@@ -28,8 +28,8 @@ module Diagnostics
 using ..Resolver: Resolver, SAT, Problem, PkgInfo, Universe, PicoSAT, Relation,
     nclasses, installed_lit, forbidden_lit, sat_assume_var, sat_solve,
     sat_new_variable, sat_add_var, sat_add, with_classes_relaxed,
-    with_temp_clauses, exclusion_kinds, is_compat_kind, compat_source, relax,
-    resolve, DepsProvider, PkgData,
+    with_temp_clauses, exclusion_kinds, is_compat_kind, is_drop_kind,
+    kind_source, drop_kind, relax, resolve, DepsProvider, PkgData,
     is_excluded
 using ..Resolver.Clauses: Clauses, Clause, Lit, literal, clause, packages,
     isbottom, subsumes, absent, present, resolve_raw, resolve_on, clause_phrase,
@@ -44,7 +44,8 @@ export Diagnosis, Conflict, Alternative, Fix, Action, Line, Upstream,
 """
     Action(kind, pkg)
 
-One thing a user could do: `:drop` a requirement on `pkg`, or lift the
+One thing a user could do: `:drop` a requirement on `pkg` — from a named place,
+where the query said one ([`drop_kind`](@ref Resolver.drop_kind)) — or lift the
 constraint of kind `kind` for `pkg`. The kinds are the query's own
 ([`Problem`](@ref Resolver.Problem)), so an action is always something the
 reader can carry out by editing what they wrote.
@@ -2206,7 +2207,16 @@ end
 
 fix_actions(prob::Problem{P}, sat::SAT{P,V}, univ::Universe{P,V},
             f::Fact{P}) where {P,V} =
-    f.req ? Action{P}[Action(:drop, f.pkg)] : lift_actions(prob, sat, univ, f.pkg)
+    f.req ? drop_actions(prob, f.pkg) : lift_actions(prob, sat, univ, f.pkg)
+
+# The actions that stop requiring `p`: one per place the query said it is
+# required from, since a requirement is dropped only when every place has
+# dropped it, or the bare one where the query said nothing.
+function drop_actions(prob::Problem{P}, p::P) where {P}
+    srcs = get(prob.sources, p, nothing)
+    srcs === nothing && return Action{P}[Action(:drop, p)]
+    return Action{P}[Action(drop_kind(s), p) for s in srcs]
+end
 
 # What carrying `actions` out gets you: the resolver's own answer for the
 # withdrawn query, on the universe the failed resolve was run against. A model
@@ -2225,10 +2235,10 @@ end
 # of the query's own, so this is a reading of the actions and not a decision
 # about them.
 function withdrawal(actions::Vector{Action{P}}) where {P}
-    drop_reqs = P[a.pkg for a in actions if a.kind === :drop]
+    drop_reqs = P[a.pkg for a in actions if is_drop_kind(a.kind)]
     drop_constraints = Dict{Symbol,Set{P}}()
     for a in actions
-        a.kind === :drop && continue
+        is_drop_kind(a.kind) && continue
         push!(get!(Set{P}, drop_constraints, a.kind), a.pkg)
     end
     return drop_reqs, drop_constraints
@@ -2318,15 +2328,17 @@ function diagnose(
     conflicts = Conflict{P,V}[]
     # what the rest of the page asks for, with section `si` (or none) left out
     function elsewhere(si::Int, skip_gone::Int)
-        as = Action{P}[Action(:drop, gone[j]) for j in eachindex(gone)
-                       if j != skip_gone]
+        as = Action{P}[]
+        for j in eachindex(gone)
+            j == skip_gone || append!(as, drop_actions(prob, gone[j]))
+        end
         for j in eachindex(defaults), a in (j == si ? Action{P}[] : defaults[j])
             a in as || push!(as, a)
         end
         return as
     end
     for (i, p) in enumerate(gone)
-        acts = Action{P}[Action(:drop, p)]
+        acts = drop_actions(prob, p)
         f = Fix{P,V}(copy(acts),
                      witness(sat, univ, prob, unique!([acts; elsewhere(0, i)]);
                              by, order))
@@ -2648,17 +2660,19 @@ One action, said as something the reader could carry out. Whatever a constraint
 kind is called inside the resolver, what it reads as here is an edit.
 """
 function action_phrase(a::Action)
-    a.kind === :drop && return "drop dependency $(a.pkg)"
+    is_drop_kind(a.kind) && return "drop dependency $(a.pkg)$(source_phrase(a.kind))"
     is_compat_kind(a.kind) && return "relax your compat on $(a.pkg)$(source_phrase(a.kind))"
     a.kind === :pin && return "unpin $(a.pkg)"
     return "allow $(a.kind) versions of $(a.pkg)"
 end
 
-# where a compat kind's constraint was declared, said after the package it is
-# on: nothing for plain `:compat`, which was declared in the one place there is
+# where a kind's constraint or requirement was declared, said after the package
+# it is on — a compat is *in* a file, a dependency dropped *from* one — and
+# nothing for a plain kind, declared in the one place there is
 function source_phrase(kind::Symbol)
-    src = compat_source(kind)
-    return src === nothing ? "" : " in $src"
+    src = kind_source(kind)
+    src === nothing && return ""
+    return is_drop_kind(kind) ? " from $src" : " in $src"
 end
 
 # a constraint kind said as the reader's own: the query's compat and pins are
@@ -2674,7 +2688,7 @@ join_or(xs) = join(xs, ", ", " or ")
 # the same action, said as the thing tried rather than the thing to do: a
 # blocked entry reports on a road not taken
 function action_gerund(a::Action)
-    a.kind === :drop && return "dropping dependency $(a.pkg)"
+    is_drop_kind(a.kind) && return "dropping dependency $(a.pkg)$(source_phrase(a.kind))"
     is_compat_kind(a.kind) && return "relaxing your compat on $(a.pkg)$(source_phrase(a.kind))"
     a.kind === :pin && return "unpinning $(a.pkg)"
     return "allowing $(a.kind) versions of $(a.pkg)"
@@ -2683,7 +2697,7 @@ end
 # ... and as the thing that would have had to happen as well: the completion
 # an "unless you also" names
 function action_past(a::Action)
-    a.kind === :drop && return "dropped dependency $(a.pkg)"
+    is_drop_kind(a.kind) && return "dropped dependency $(a.pkg)$(source_phrase(a.kind))"
     is_compat_kind(a.kind) && return "relaxed your compat on $(a.pkg)$(source_phrase(a.kind))"
     a.kind === :pin && return "unpinned $(a.pkg)"
     return "allowed $(a.kind) versions of $(a.pkg)"

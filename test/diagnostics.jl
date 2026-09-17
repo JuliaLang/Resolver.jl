@@ -79,15 +79,23 @@ fact_indices(sat::SAT{P}, p::P, versions) where {P} =
 
 
 # the withdrawal a set of actions asks for, read off here rather than taken
-# from the diagnosis: `:drop` names a requirement to stop requiring, every
-# other kind names a constraint of the problem and a package to lift it for
-function withdrawal(actions::Vector{Action{P}}) where {P}
-    drop_reqs = P[a.pkg for a in actions if a.kind === :drop]
+# from the diagnosis: `:drop` names a requirement to stop requiring — one the
+# problem says is required from several places is dropped only once every one
+# of them has dropped it — and every other kind names a constraint of the
+# problem and a package to lift it for
+function withdrawal(prob::Problem{P}, actions::Vector{Action{P}}) where {P}
+    dropped = Dict{P,Set{Union{Nothing,String}}}()
     drop_constraints = Dict{Symbol,Set{P}}()
     for a in actions
-        a.kind === :drop && continue
-        push!(get!(Set{P}, drop_constraints, a.kind), a.pkg)
+        if Resolver.is_drop_kind(a.kind)
+            push!(get!(Set{Union{Nothing,String}}, dropped, a.pkg),
+                  Resolver.drop_source(a.kind))
+        else
+            push!(get!(Set{P}, drop_constraints, a.kind), a.pkg)
+        end
     end
+    drop_reqs = P[p for (p, srcs) in dropped
+                  if nothing in srcs || get(prob.sources, p, String[]) ⊆ srcs]
     return drop_reqs, drop_constraints
 end
 
@@ -95,7 +103,7 @@ end
 # prepared and resolved from the artifact, filter and all
 fix_resolve(info, prob::Problem{P}, actions::Vector{Action{P}};
             order = nothing, by = identity) where {P} =
-    resolve(info, relax(prob, withdrawal(actions)...); order, by, diagnose = false)
+    resolve(info, relax(prob, withdrawal(prob, actions)...); order, by, diagnose = false)
 
 # the repairs one conflict offers: its menu's entries, one by one
 offers(c::Conflict) = Diagnostics.selections(c)
@@ -2240,4 +2248,42 @@ end
     @test c.fixes[1].solution == Dict(:P => :p2, :R => :r1)
     @test occursin("your compat in Other/Project.toml and your compat in Sub/Project.toml",
                    replace(sprint(show, MIME("text/plain"), d), "\n    " => " "))
+end
+
+@testset "diagnosis: a requirement from a named source" begin
+    # a requirement can say where it is required from, and then the fix that
+    # drops it says where to drop it from
+    using Resolver: drop_kind, drop_source, is_drop_kind, relax
+    @test drop_source(drop_kind("Sub/Project.toml")) == "Sub/Project.toml"
+    @test is_drop_kind(:drop) && is_drop_kind(drop_kind("x")) && !is_drop_kind(:compat)
+    @test drop_source(:drop) === nothing && drop_source(:compat) === nothing
+    data = Dict(
+        :R => PkgData([:r1], Dict(:r1 => [:P]), Dict(:r1 => Dict(:P => [:p2]))),
+        :P => PkgData([:p2, :p1], DEPS_NONE, COMP_NONE),
+    )
+    prob = Problem([:R => ["Sub/Project.toml"]]; compat = Dict(:P => [:p1]))
+    @test prob.reqs == [:R]
+    @test prob.sources == Dict(:R => ["Sub/Project.toml"])
+    # relaxing keeps the sources of what it still requires, and no others
+    @test relax(prob, Symbol[], Dict{Symbol,Set{Symbol}}()).sources == prob.sources
+    @test isempty(relax(prob, [:R], Dict{Symbol,Set{Symbol}}()).sources)
+    d = check_diagnosis(data, prob)
+    report = sprint(show, MIME("text/plain"), d)
+    @test occursin("2. drop dependency R from Sub/Project.toml", report)
+    @test d.conflicts[1].fixes[2].actions == [Action(drop_kind("Sub/Project.toml"), :R)]
+    # required from two places: dropping it means dropping it from both
+    prob = Problem([:R => ["A/Project.toml", "B/Project.toml"]]; compat = Dict(:P => [:p1]))
+    d = check_diagnosis(data, prob)
+    @test Set(d.conflicts[1].fixes[2].actions) ==
+        Set([Action(drop_kind("A/Project.toml"), :R), Action(drop_kind("B/Project.toml"), :R)])
+    @test occursin("drop dependency R from A/Project.toml and drop dependency R from B/Project.toml",
+                   sprint(show, MIME("text/plain"), d))
+    # a requirement of a package the universe holds nothing of: dropped from
+    # its source too
+    d = check_diagnosis(Dict(:R => PkgData(Symbol[], DEPS_NONE, COMP_NONE)),
+                        Problem([:R => ["Sub/Project.toml"]]))
+    @test occursin("drop dependency R from Sub/Project.toml", sprint(show, MIME("text/plain"), d))
+    # no sources: the bare action, as ever
+    d = check_diagnosis(data, Problem([:R]; compat = Dict(:P => [:p1])))
+    @test d.conflicts[1].fixes[2].actions == [Action(:drop, :R)]
 end

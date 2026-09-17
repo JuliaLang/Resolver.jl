@@ -7,6 +7,9 @@ Problem
 Resolver.compat_kind
 Resolver.compat_source
 Resolver.is_compat_kind
+Resolver.drop_kind
+Resolver.drop_source
+Resolver.is_drop_kind
 Diagnosis
 ```
 

@@ -28,6 +28,11 @@ which versions are admissible. A `Problem` carries everything that determines
 *satisfiability*; orderings (the `by` priority order, the `order` version rank
 order) are `resolve` parameters instead.
 
+`reqs` may instead be `pkg => sources` pairs, `sources` naming where `pkg` is
+required from — the `Project.toml` files of a workspace, say. Satisfiability
+does not depend on it; a report does, since a fix that drops the requirement
+can then say where from ("drop dependency X from a/Project.toml").
+
 Every keyword is a constraint, and its name is the constraint's *kind*:
 
   * `compat`: per package, the set of allowed versions (queried with `in`).
@@ -57,6 +62,32 @@ struct Problem{P, C<:AbstractDict{Symbol}}
     # the constraints, by kind. Typed as a parameter so that an unconstrained
     # problem can share one immutable empty dictionary rather than make one
     constraints :: C
+    # where each requirement is required from, for the ones the query said
+    sources :: Dict{P,Vector{String}}
+end
+
+Problem(reqs::Vector{P}, constraints::AbstractDict{Symbol}) where {P} =
+    Problem(reqs, constraints, Dict{P,Vector{String}}())
+
+# A kind can carry the source it was declared in after an `@`: `compat@a/Project.toml`
+# is that file's compat, `drop@a/Project.toml` the dropping of a requirement it
+# makes. A kind is a symbol wherever it goes — a report is plain data, and a
+# caller rebuilding one over its own package names keeps the kinds as they are —
+# so the source rides inside the symbol, and these two read the halves back.
+const SOURCE_SEP = '@'
+
+sourced_kind(base::Symbol, source::AbstractString) = Symbol(base, SOURCE_SEP, source)
+
+function kind_base(kind::Symbol)
+    s = String(kind)
+    i = findfirst(==(SOURCE_SEP), s)
+    return i === nothing ? kind : Symbol(SubString(s, 1, prevind(s, i)))
+end
+
+function kind_source(kind::Symbol)
+    s = String(kind)
+    i = findfirst(==(SOURCE_SEP), s)
+    return i === nothing ? nothing : String(SubString(s, nextind(s, i)))
 end
 
 """
@@ -68,9 +99,7 @@ compat comes from several places and a report should say which one to relax —
 exactly as it takes `compat`, and [`compat_source`](@ref Resolver.compat_source)
 reads the source back off it.
 """
-compat_kind(source::AbstractString) = Symbol(COMPAT_PREFIX, source)
-
-const COMPAT_PREFIX = "compat@"
+compat_kind(source::AbstractString) = sourced_kind(:compat, source)
 
 """
     is_compat_kind(kind) :: Bool
@@ -78,7 +107,7 @@ const COMPAT_PREFIX = "compat@"
 Is `kind` a compat constraint: `:compat` itself or one from [`compat_kind`](@ref
 Resolver.compat_kind)?
 """
-is_compat_kind(kind::Symbol) = kind === :compat || startswith(String(kind), COMPAT_PREFIX)
+is_compat_kind(kind::Symbol) = kind_base(kind) === :compat
 
 """
     compat_source(kind) :: Union{Nothing, String}
@@ -86,9 +115,34 @@ is_compat_kind(kind::Symbol) = kind === :compat || startswith(String(kind), COMP
 The source a compat kind was made from, or `nothing` for plain `:compat` and
 for kinds that are not compat at all.
 """
-compat_source(kind::Symbol) =
-    kind === :compat || !is_compat_kind(kind) ? nothing :
-    String(chopprefix(String(kind), COMPAT_PREFIX))
+compat_source(kind::Symbol) = is_compat_kind(kind) ? kind_source(kind) : nothing
+
+"""
+    drop_kind(source) :: Symbol
+
+The kind of the action that drops a requirement from `source`: what a report's
+fix names for a requirement whose `Problem` said where it is required from
+("drop dependency X from a/Project.toml"). Plain `:drop` is the same action for
+a requirement that said nothing. [`drop_source`](@ref Resolver.drop_source)
+reads the source back off it.
+"""
+drop_kind(source::AbstractString) = sourced_kind(:drop, source)
+
+"""
+    is_drop_kind(kind) :: Bool
+
+Is `kind` the dropping of a requirement: `:drop` itself or one from
+[`drop_kind`](@ref Resolver.drop_kind)?
+"""
+is_drop_kind(kind::Symbol) = kind_base(kind) === :drop
+
+"""
+    drop_source(kind) :: Union{Nothing, String}
+
+The source a drop kind was made from, or `nothing` for plain `:drop` and for
+kinds that are not drops at all.
+"""
+drop_source(kind::Symbol) = is_drop_kind(kind) ? kind_source(kind) : nothing
 
 # the three ways to build one. A caller's dictionary is copied, so later
 # mutation cannot change the problem
@@ -142,6 +196,18 @@ function Problem(reqs::SetOrVec{P}; kinds...) where {P}
     return Problem(r, something(cs, EmptyDict{Symbol,Constraint{P}}()))
 end
 
+# the requirements with where each is required from: the same problem, which
+# remembers the sources for the report
+function Problem(reqs::AbstractVector{<:Pair{P}}; kinds...) where {P}
+    prob = Problem(P[first(r) for r in reqs]; kinds...)
+    sources = Dict{P,Vector{String}}()
+    for (p, srcs) in reqs
+        union!(get!(Vector{String}, sources, p), String[String(s) for s in srcs])
+    end
+    filter!(kv -> !isempty(last(kv)), sources)
+    return Problem(prob.reqs, prob.constraints, sources)
+end
+
 # `prob` no longer requiring `drop_reqs`, nor applying each constraint in
 # `drop_constraints` to the packages named there — a relaxation being the same problem
 # with demands lifted, and so built by lifting them
@@ -157,7 +223,9 @@ function relax(
         c′ === nothing || (cs[kind] = c′)
     end
     r = P[p for p in prob.reqs if p ∉ gone]
-    return isempty(cs) ? Problem(r, EmptyDict{Symbol,Constraint{P}}()) : Problem(r, cs)
+    srcs = Dict{P,Vector{String}}(p => s for (p, s) in prob.sources if p ∉ gone)
+    return isempty(cs) ? Problem(r, EmptyDict{Symbol,Constraint{P}}(), srcs) :
+                         Problem(r, cs, srcs)
 end
 
 # does the problem constrain anything at all? the fast paths below lean on this:
