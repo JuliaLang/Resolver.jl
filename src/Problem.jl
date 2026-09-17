@@ -57,17 +57,19 @@ a deletion from a private one: that is what lets a single T1 artifact (see
 [`pkg_info`](@ref Resolver.pkg_info)) serve queries that admit different things,
 and what lets diagnostics eventually name the kind that ruled a version out.
 """
-struct Problem{P, C<:AbstractDict{Symbol}}
+struct Problem{P, C<:AbstractDict{Symbol}, S<:AbstractDict{P,Vector{String}}}
     reqs :: Vector{P}
     # the constraints, by kind. Typed as a parameter so that an unconstrained
     # problem can share one immutable empty dictionary rather than make one
     constraints :: C
-    # where each requirement is required from, for the ones the query said
-    sources :: Dict{P,Vector{String}}
+    # where each requirement is required from, for the ones the query said.
+    # A parameter for the same reason: a query that said nothing, which is
+    # every convenience `resolve`, shares the empty map rather than making one
+    sources :: S
 end
 
 Problem(reqs::Vector{P}, constraints::AbstractDict{Symbol}) where {P} =
-    Problem(reqs, constraints, Dict{P,Vector{String}}())
+    Problem(reqs, constraints, EmptyDict{P,Vector{String}}())
 
 # A kind can carry the source it was declared in after an `@`: `compat@a/Project.toml`
 # is that file's compat, `drop@a/Project.toml` the dropping of a requirement it
@@ -78,13 +80,21 @@ const SOURCE_SEP = '@'
 
 sourced_kind(base::Symbol, source::AbstractString) = Symbol(base, SOURCE_SEP, source)
 
+# The bare kinds carry no source, and are answered by identity before the
+# symbol is read as a string: reading it allocates, `check_constraints` asks
+# for every kind of every `Problem`, and an unconstrained problem is promised
+# to cost its vector and its struct and nothing else
+const BARE_KINDS = (:compat, :pin, :drop)
+
 function kind_base(kind::Symbol)
+    kind in BARE_KINDS && return kind
     s = String(kind)
     i = findfirst(==(SOURCE_SEP), s)
     return i === nothing ? kind : Symbol(SubString(s, 1, prevind(s, i)))
 end
 
 function kind_source(kind::Symbol)
+    kind in BARE_KINDS && return nothing
     s = String(kind)
     i = findfirst(==(SOURCE_SEP), s)
     return i === nothing ? nothing : String(SubString(s, nextind(s, i)))
@@ -205,6 +215,7 @@ function Problem(reqs::AbstractVector{<:Pair{P}}; kinds...) where {P}
         union!(get!(Vector{String}, sources, p), String[String(s) for s in srcs])
     end
     filter!(kv -> !isempty(last(kv)), sources)
+    isempty(sources) && return prob
     return Problem(prob.reqs, prob.constraints, sources)
 end
 
@@ -224,8 +235,8 @@ function relax(
     end
     r = P[p for p in prob.reqs if p ∉ gone]
     srcs = Dict{P,Vector{String}}(p => s for (p, s) in prob.sources if p ∉ gone)
-    return isempty(cs) ? Problem(r, EmptyDict{Symbol,Constraint{P}}(), srcs) :
-                         Problem(r, cs, srcs)
+    return Problem(r, isempty(cs)   ? EmptyDict{Symbol,Constraint{P}}() : cs,
+                      isempty(srcs) ? EmptyDict{P,Vector{String}}()     : srcs)
 end
 
 # does the problem constrain anything at all? the fast paths below lean on this:
