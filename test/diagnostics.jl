@@ -2269,6 +2269,8 @@ end
     @test isempty(relax(prob, [:R], Dict{Symbol,Set{Symbol}}()).sources)
     d = check_diagnosis(data, prob)
     report = sprint(show, MIME("text/plain"), d)
+    @test occursin("Conflict 1: R (required by Sub/Project.toml)\n", report)
+    @test only(d.conflicts).sources == Dict(:R => ["Sub/Project.toml"])
     @test occursin("2. drop dependency R from Sub/Project.toml", report)
     @test d.conflicts[1].fixes[2].actions == [Action(drop_kind("Sub/Project.toml"), :R)]
     # required from two places: dropping it means dropping it from both
@@ -2282,7 +2284,9 @@ end
     # its source too
     d = check_diagnosis(Dict(:R => PkgData(Symbol[], DEPS_NONE, COMP_NONE)),
                         Problem([:R => ["Sub/Project.toml"]]))
-    @test occursin("drop dependency R from Sub/Project.toml", sprint(show, MIME("text/plain"), d))
+    report = sprint(show, MIME("text/plain"), d)
+    @test occursin("no version of R (required by Sub/Project.toml) is available.", report)
+    @test occursin("drop dependency R from Sub/Project.toml", report)
     # no sources: the bare action, as ever
     d = check_diagnosis(data, Problem([:R]; compat = Dict(:P => [:p1])))
     @test d.conflicts[1].fixes[2].actions == [Action(:drop, :R)]

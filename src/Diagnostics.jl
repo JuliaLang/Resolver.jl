@@ -134,7 +134,7 @@ end
 
 """
     Conflict(reqs, lines, versions, excluded, fixes,
-             blocks = [], upstream = [], shadows = Dict())
+             blocks = [], upstream = [], shadows = Dict(), sources = Dict())
 
 One independent thing that is wrong: the requirements it answers for, the lines
 that prove it, the version list each named package is spoken of in, which of
@@ -197,6 +197,8 @@ struct Conflict{P,V}
     # and, for each, the entries that dominated it: the record a checker needs
     # to recompute the widening every line is printed over (V8).
     shadows  :: Dict{P,Vector{Tuple{Int,Vector{Int}}}}
+    # where each of `reqs` is required from, for the ones the query said
+    sources  :: Dict{P,Vector{String}}
 end
 
 Conflict{P,V}(reqs, lines, versions, excluded, fixes) where {P,V} =
@@ -208,6 +210,16 @@ Conflict{P,V}(reqs, lines, versions, excluded, fixes, blocks) where {P,V} =
 Conflict{P,V}(reqs, lines, versions, excluded, fixes, blocks, upstream) where {P,V} =
     Conflict{P,V}(reqs, lines, versions, excluded, fixes, blocks, upstream,
                   Dict{P,Vector{Tuple{Int,Vector{Int}}}}())
+Conflict{P,V}(reqs, lines, versions, excluded, fixes, blocks, upstream,
+              shadows) where {P,V} =
+    Conflict{P,V}(reqs, lines, versions, excluded, fixes, blocks, upstream,
+                  shadows, Dict{P,Vector{String}}())
+
+# where the query says `reqs` are required from: the heading's share of
+# `prob.sources`
+req_sources(prob::Problem{P}, reqs::Vector{P}) where {P} =
+    Dict{P,Vector{String}}(r => prob.sources[r] for r in reqs
+                           if haskey(prob.sources, r))
 
 """
     selections(c) :: Vector{Vector{Action{P}}}
@@ -2344,7 +2356,9 @@ function diagnose(
                              by, order))
         push!(conflicts, Conflict{P,V}(P[p], Line{P}[], Dict{P,Vector{V}}(),
             Dict{P,Vector{Vector{Symbol}}}(), Fix{P,V}[f],
-            Tuple{Vector{Vector{Action{P}}},Vector{Action{P}}}[]))
+            Tuple{Vector{Vector{Action{P}}},Vector{Action{P}}}[],
+            Upstream{P,V}[], Dict{P,Vector{Tuple{Int,Vector{Int}}}}(),
+            req_sources(prob, P[p])))
     end
     # one menu of a layer, as the fixes it offers: each option withdrawn with
     # the layer's other menus settled the first way they offer, which is how
@@ -2384,7 +2398,8 @@ function diagnose(
         # over the universe the user sees, lines and all (`widened`)
         versions, excluded, shadows, lines = widened(sat, prob, pkgs, lines)
         push!(conflicts, Conflict{P,V}(plan.reqs[i], lines, versions, excluded,
-                                       fixes, blocks, Upstream{P,V}[], shadows))
+                                       fixes, blocks, Upstream{P,V}[], shadows,
+                                       req_sources(prob, plan.reqs[i])))
     end
     # Every layer after the leading one is an alternative to the whole of its
     # section's conflicts. Which of them it declines is read off the facts: a
@@ -2587,7 +2602,7 @@ function upstream_fixes(deps::DepsProvider{P,D}, prob::Problem{P},
     (cut || any(!isempty, ups)) || return d
     conflicts = Conflict{P,V}[
         Conflict{P,V}(c.reqs, c.lines, c.versions, c.excluded, c.fixes,
-                      c.blocks, ups[i], c.shadows)
+                      c.blocks, ups[i], c.shadows, c.sources)
         for (i, c) in enumerate(d.conflicts)]
     return Diagnosis{P,V}(conflicts, d.alternatives, d.others, d.truncated,
                           d.upstream_cut | cut)
@@ -2720,11 +2735,19 @@ heading_reqs(c::Conflict) = c.reqs
 function conflict_heading(c::Conflict, also = nothing)
     rs = heading_reqs(c)
     isempty(c.lines) && length(rs) == 1 &&
-        return "no version of $(only(rs)) is available."
+        return "no version of $(req_phrase(c, only(rs))) is available."
     isempty(rs) && return "the dependencies"
-    parts = String[string(r) for r in rs]
+    parts = String[req_phrase(c, r) for r in rs]
     also === nothing || push!(parts, string(also))
     return join_and(parts)
+end
+
+# a requirement as the heading names it: with where the query says it is
+# required from, since a reader of a workspace's report goes to that file
+function req_phrase(c::Conflict{P,V}, r::P) where {P,V}
+    srcs = get(c.sources, r, nothing)
+    srcs === nothing && return string(r)
+    return "$r (required by $(join(srcs, ", ")))"
 end
 
 # The packages a conflict's lines name, in the order the lines name them.
