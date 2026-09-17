@@ -31,6 +31,10 @@ order) are `resolve` parameters instead.
 Every keyword is a constraint, and its name is the constraint's *kind*:
 
   * `compat`: per package, the set of allowed versions (queried with `in`).
+  * a kind made by [`compat_kind`](@ref Resolver.compat_kind): the same, from a
+    named source — a workspace member's `Project.toml`, say — so that a report
+    can say which compat to relax, and where. Passed as a pair, since the name
+    is not an identifier: `Problem(reqs; compat_kind("a/Project.toml") => d)`.
   * `pin`: per package, the one version it is held at.
   * anything else: a predicate `(p, v) -> Bool`, true for the versions that kind
     forbids — "no prereleases" is the one the resolver's own tooling uses. These
@@ -55,15 +59,48 @@ struct Problem{P, C<:AbstractDict{Symbol}}
     constraints :: C
 end
 
+"""
+    compat_kind(source) :: Symbol
+
+The kind of a compat constraint from `source`: what a query passes when its
+compat comes from several places and a report should say which one to relax —
+"relax your compat on X in a/Project.toml". A `Problem` takes such a kind
+exactly as it takes `compat`, and [`compat_source`](@ref Resolver.compat_source)
+reads the source back off it.
+"""
+compat_kind(source::AbstractString) = Symbol(COMPAT_PREFIX, source)
+
+const COMPAT_PREFIX = "compat@"
+
+"""
+    is_compat_kind(kind) :: Bool
+
+Is `kind` a compat constraint: `:compat` itself or one from [`compat_kind`](@ref
+Resolver.compat_kind)?
+"""
+is_compat_kind(kind::Symbol) = kind === :compat || startswith(String(kind), COMPAT_PREFIX)
+
+"""
+    compat_source(kind) :: Union{Nothing, String}
+
+The source a compat kind was made from, or `nothing` for plain `:compat` and
+for kinds that are not compat at all.
+"""
+compat_source(kind::Symbol) =
+    kind === :compat || !is_compat_kind(kind) ? nothing :
+    String(chopprefix(String(kind), COMPAT_PREFIX))
+
 # the three ways to build one. A caller's dictionary is copied, so later
 # mutation cannot change the problem
-constraint(::Type{P}, ::Val{:compat}, d::AbstractDict) where {P} =
+compat_constraint(::Type{P}, d::AbstractDict) where {P} =
     (e = Dict(d); Constraint{P}(
         (p, v) -> (s = get(e, p, nothing); s !== nothing && v ∉ s), Set{P}(keys(e))))
+constraint(::Type{P}, ::Val{:compat}, d::AbstractDict) where {P} = compat_constraint(P, d)
 constraint(::Type{P}, ::Val{:pin}, d::AbstractDict) where {P} =
     (e = Dict(d); Constraint{P}(
         (p, v) -> (w = get(e, p, nothing); w !== nothing && v != w), Set{P}(keys(e))))
-constraint(::Type{P}, ::Val{K}, forbids) where {P,K} = Constraint{P}(forbids, nothing)
+constraint(::Type{P}, ::Val{K}, forbids) where {P,K} =
+    is_compat_kind(K) ? compat_constraint(P, forbids) : Constraint{P}(forbids, nothing)
 
 # this constraint no longer applying to `pkgs`, or `nothing` when nothing of it
 # is left — so relaxing a kind for the packages it names relaxes it entirely,
@@ -81,7 +118,7 @@ end
 # predicate. Checked once, here, so that nothing downstream has to look.
 function check_constraints(::Type{P}, kinds::NamedTuple) where {P}
     for (kind, value) in pairs(kinds)
-        want = kind in (:compat, :pin) ?
+        want = is_compat_kind(kind) || kind === :pin ?
             (value isa AbstractDict{P} ? nothing : "a dictionary keyed by package ($P)") :
             (isempty(methods(value)) ? "a predicate, `(p, v) -> Bool`" : nothing)
         want === nothing || throw(ArgumentError(

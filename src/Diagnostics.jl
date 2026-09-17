@@ -28,7 +28,8 @@ module Diagnostics
 using ..Resolver: Resolver, SAT, Problem, PkgInfo, Universe, PicoSAT, Relation,
     nclasses, installed_lit, forbidden_lit, sat_assume_var, sat_solve,
     sat_new_variable, sat_add_var, sat_add, with_classes_relaxed,
-    with_temp_clauses, exclusion_kinds, relax, resolve, DepsProvider, PkgData,
+    with_temp_clauses, exclusion_kinds, is_compat_kind, compat_source, relax,
+    resolve, DepsProvider, PkgData,
     is_excluded
 using ..Resolver.Clauses: Clauses, Clause, Lit, literal, clause, packages,
     isbottom, subsumes, absent, present, resolve_raw, resolve_on, clause_phrase,
@@ -2648,9 +2649,23 @@ kind is called inside the resolver, what it reads as here is an edit.
 """
 function action_phrase(a::Action)
     a.kind === :drop && return "drop dependency $(a.pkg)"
-    a.kind === :compat && return "relax your compat on $(a.pkg)"
+    is_compat_kind(a.kind) && return "relax your compat on $(a.pkg)$(source_phrase(a.kind))"
     a.kind === :pin && return "unpin $(a.pkg)"
     return "allow $(a.kind) versions of $(a.pkg)"
+end
+
+# where a compat kind's constraint was declared, said after the package it is
+# on: nothing for plain `:compat`, which was declared in the one place there is
+function source_phrase(kind::Symbol)
+    src = compat_source(kind)
+    return src === nothing ? "" : " in $src"
+end
+
+# a constraint kind said as the reader's own: the query's compat and pins are
+# the reader's, and a compat from a named source is the reader's compat there
+function your_phrase(kind::Symbol)
+    is_compat_kind(kind) && return "your compat$(source_phrase(kind))"
+    return "your $kind"
 end
 
 join_and(xs) = join(xs, ", ", " and ")
@@ -2660,7 +2675,7 @@ join_or(xs) = join(xs, ", ", " or ")
 # blocked entry reports on a road not taken
 function action_gerund(a::Action)
     a.kind === :drop && return "dropping dependency $(a.pkg)"
-    a.kind === :compat && return "relaxing your compat on $(a.pkg)"
+    is_compat_kind(a.kind) && return "relaxing your compat on $(a.pkg)$(source_phrase(a.kind))"
     a.kind === :pin && return "unpinning $(a.pkg)"
     return "allowing $(a.kind) versions of $(a.pkg)"
 end
@@ -2669,7 +2684,7 @@ end
 # an "unless you also" names
 function action_past(a::Action)
     a.kind === :drop && return "dropped dependency $(a.pkg)"
-    a.kind === :compat && return "relaxed your compat on $(a.pkg)"
+    is_compat_kind(a.kind) && return "relaxed your compat on $(a.pkg)$(source_phrase(a.kind))"
     a.kind === :pin && return "unpinned $(a.pkg)"
     return "allowed $(a.kind) versions of $(a.pkg)"
 end
@@ -2779,7 +2794,7 @@ function constraint_phrase(c::Conflict{P,V}, p::P, l::Line{P}) where {P,V}
         k in kinds || push!(kinds, k)
     end
     sort!(kinds)
-    lead = join(String["your $k" for k in kinds], " and ")
+    lead = join(String[your_phrase(k) for k in kinds], " and ")
     # every verb below is regular, so agreement is one suffix
     s = length(kinds) > 1 ? "" : "s"
     m = l.clause[p]

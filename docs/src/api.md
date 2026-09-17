@@ -4,6 +4,9 @@
 resolve
 issatisfiable
 Problem
+Resolver.compat_kind
+Resolver.compat_source
+Resolver.is_compat_kind
 Diagnosis
 ```
 
