@@ -3365,7 +3365,9 @@ function Base.show(io::IO, d::Diagnosis)
           f, f == 1 ? " fix" : " fixes")
 end
 
-function Base.show(io::IO, ::MIME"text/plain", d::Diagnosis)
+# The report, printed plain. `show` prints it in color where the stream takes
+# color; what the page says is decided here, and color only marks what it says.
+function print_report(io::IO, d::Diagnosis)
     n = length(d.conflicts)
     print(io, "Unsatisfiable — ", n, n == 1 ? " conflict" : " conflicts")
     # "pick a fix for each" is what the page asks of the reader: every
@@ -3413,6 +3415,113 @@ function Base.show(io::IO, ::MIME"text/plain", d::Diagnosis)
     # is checked, and the fixes' completeness is the enumeration's question
     # above, not the walk's — so there is nothing a reader could do with the
     # sentence, and the page owes only what it can be acted on.
+end
+
+function Base.show(io::IO, ::MIME"text/plain", d::Diagnosis)
+    get(io, :color, false)::Bool || return print_report(io, d)
+    print_colored(io, sprint(print_report, d), package_names(d), version_names(d))
+end
+
+## color
+
+# A report names a handful of packages over and over, and a reader following a
+# chain is tracking which line speaks of which. Each package is printed in a
+# color of its own, and a version in the color of the package it belongs to —
+# the package named last in its clause, which is what every sentence on the
+# page puts a version after ("DataFrames 1.8.2", "restricts P to p1"). A
+# version no package precedes in its clause — after the semicolon of an
+# upstream sentence, say — is left plain rather than guessed at.
+#
+# Color is added to the finished page, not while it is composed: the page is
+# wrapped and checked as plain text, and a colored page differs from it by
+# escapes alone. The palette and the choice of color are Pkg's own for its
+# resolve log — the system colors less the greys and error-red, picked by the
+# hash of the name — so a package reads in the same color wherever it is shown.
+const PACKAGE_COLORS = [1:6; 10:14]
+
+package_color(name::AbstractString) = PACKAGE_COLORS[mod1(hash(name), end)]
+
+# every package the page could name, as it names it
+function package_names(d::Diagnosis{P,V}) where {P,V}
+    ps = Set{P}()
+    for c in d.conflicts
+        union!(ps, c.reqs, keys(c.versions), keys(c.excluded))
+        for f in c.fixes
+            union!(ps, (a.pkg for a in f.actions), keys(f.solution))
+        end
+        for (bundles, unless) in c.blocks
+            union!(ps, (a.pkg for b in bundles for a in b), (a.pkg for a in unless))
+        end
+        for u in c.upstream
+            union!(ps, (u.pkg, u.dep), keys(u.solution))
+        end
+    end
+    for a in d.alternatives, m in a.menus, f in m
+        union!(ps, (x.pkg for x in f.actions), keys(f.solution))
+    end
+    return unique!(String[string(p) for p in ps])
+end
+
+# ... and every version, as the page prints it
+function version_names(d::Diagnosis{P,V}) where {P,V}
+    vs = Set{V}()
+    for c in d.conflicts
+        for ws in values(c.versions)
+            union!(vs, ws)
+        end
+        for f in c.fixes
+            union!(vs, values(f.solution))
+        end
+        for u in c.upstream
+            union!(vs, (u.latest, u.supports), u.supported, values(u.solution))
+        end
+    end
+    for a in d.alternatives, m in a.menus, f in m
+        union!(vs, values(f.solution))
+    end
+    return unique!(String[string(v) for v in vs])
+end
+
+# a regex matching any of `words` whole, longest first so that a name that is
+# a prefix of another never claims the other's start, and never inside a word:
+# `JSON` is not the `JSON` in `JSON3`, and `1.2` is not the `1.2` in `1.2.3`
+function words_regex(words::Vector{String}, edge::String)
+    isempty(words) && return nothing
+    alts = join((replace(w, r"([\\^$.|?*+()\[\]{}])" => s"\\\1")
+                 for w in sort(words; by = length, rev = true)), "|")
+    return Regex("(?<![$edge])(?:$alts)(?![$edge])")
+end
+
+function print_colored(io::IO, text::AbstractString, names::Vector{String},
+                       versions::Vector{String})
+    name_re = words_regex(names, "A-Za-z0-9_")
+    ver_re = words_regex(versions, "A-Za-z0-9_.")
+    for line in eachline(IOBuffer(text); keep = true)
+        color = nothing # the package named last on this line
+        # the tokens on the line, in order; a name takes precedence where a
+        # version string happens to match inside one
+        tokens = Tuple{UnitRange{Int},Symbol}[]
+        name_re === nothing || for m in eachmatch(name_re, line)
+            push!(tokens, (m.offset:m.offset + ncodeunits(m.match) - 1, :name))
+        end
+        ver_re === nothing || for m in eachmatch(ver_re, line)
+            r = m.offset:m.offset + ncodeunits(m.match) - 1
+            any(t -> !isempty(intersect(t[1], r)), tokens) && continue
+            push!(tokens, (r, :version))
+        end
+        sort!(tokens; by = first)
+        pos = 1
+        for (r, kind) in tokens
+            between = SubString(line, pos, prevind(line, first(r)))
+            print(io, between)
+            ';' in between && (color = nothing)
+            word = SubString(line, first(r), last(r))
+            kind === :name && (color = package_color(word))
+            color === nothing ? print(io, word) : printstyled(io, word; color)
+            pos = nextind(line, last(r))
+        end
+        print(io, SubString(line, pos))
+    end
 end
 
 ## verification

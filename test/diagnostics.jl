@@ -2191,3 +2191,48 @@ end
     @test occursin("→ would allow: Q 3, X 1", flat)
     @test occursin("→ would allow: R 2, X 1", flat)
 end
+
+@testset "report: color" begin
+    # a colored page is the plain page with escapes around what it names: the
+    # packages, each in a color of its own, and the versions in the color of
+    # the package named before them in the clause
+    using Resolver.Diagnostics: package_color, package_names, version_names
+    data = Dict(
+        :R => PkgData([:r1], Dict(:r1 => [:P]), Dict(:r1 => Dict(:P => [:p2]))),
+        :P => PkgData([:p2, :p1], DEPS_NONE, COMP_NONE),
+    )
+    d = check_diagnosis(data, Problem([:R]; compat = Dict(:P => [:p1])))
+    plain = sprint(show, MIME("text/plain"), d)
+    color = sprint(show, MIME("text/plain"), d; context = :color => true)
+    @test !occursin('\e', plain)
+    @test occursin('\e', color)
+    @test replace(color, r"\e\[[0-9;]*m" => "") == plain
+    @test Set(package_names(d)) == Set(["R", "P"])
+    @test Set(version_names(d)) == Set(["r1", "p2", "p1"])
+    styled(s, name) = sprint((io, x) -> printstyled(io, x; color = package_color(name)), s;
+                             context = :color => true)
+    # a package in its color wherever it appears, and its versions with it
+    @test occursin("Conflict 1: " * styled("R", "R") * "\n", color)
+    @test occursin(styled("R", "R") * " " * styled("r1", "R") * " requires " *
+                   styled("P", "P") * " " * styled("p2", "P"), color)
+    @test occursin("restricts " * styled("P", "P") * " to " * styled("p1", "P"), color)
+    @test occursin("allows: " * styled("P", "P") * " " * styled("p2", "P") * ", " *
+                   styled("R", "R") * " " * styled("r1", "R"), color)
+    # a version after the semicolon of the upstream sentence belongs to no
+    # package the clause names, and is left plain
+    @test occursin("would fix this; r1, its latest", color)
+    @test occursin("supports only p2.", color)
+    # the same name always takes the same color, and different names differ
+    # here
+    @test package_color("R") == package_color("R")
+    @test package_color("R") != package_color("P")
+    # a name is never colored inside another word
+    d2 = check_diagnosis(Dict(
+        :A => PkgData([:a1], Dict(:a1 => [:AB]), Dict(:a1 => Dict(:AB => [:b2]))),
+        :AB => PkgData([:b2, :b1], DEPS_NONE, COMP_NONE),
+    ), Problem([:A]; compat = Dict(:AB => [:b1])))
+    color2 = sprint(show, MIME("text/plain"), d2; context = :color => true)
+    @test occursin(styled("A", "A") * " " * styled("a1", "A") * " requires " *
+                   styled("AB", "AB") * " " * styled("b2", "AB"), color2)
+    @test !occursin(styled("A", "A") * "B", color2)
+end
