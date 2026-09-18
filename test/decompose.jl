@@ -5,12 +5,13 @@
 # factor and check that every layer is exact and the layers are all of it.
 
 using Resolver.Diagnostics: decompose, tree_shape, flatten_menus, product_menus,
-    subsets, DecompNode, product_cover, cover_selections
+    DecompNode, product_cover, cover_selections
 
 # each ground `used` is the sorted union of the family's facts
 ground(F) = sort!(unique!(reduce(vcat, F; init = Int[])))
-# all k-subsets of 1:n, the uniform (threshold) family
-ksubsets(n, k) = subsets(collect(1:n), k)
+# all k-subsets of 1:n in order, the uniform (threshold) family
+ksubsets(n, k) = k == 0 ? [Int[]] :
+    Vector{Int}[[s; i] for i in k:n for s in ksubsets(i - 1, k - 1)]
 
 @testset "decompose: validated fixtures" begin
     shape(F) = tree_shape(decompose(F, ground(F)))
