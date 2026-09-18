@@ -30,16 +30,18 @@ order) are `resolve` parameters instead.
 
 `reqs` may instead be `pkg => sources` pairs, `sources` naming where `pkg` is
 required from — the `Project.toml` files of a workspace, say. Satisfiability
-does not depend on it; a report does, since a fix that drops the requirement
-can then say where from ("drop dependency X from a/Project.toml").
+does not depend on it; a report does, since the fix that drops the requirement
+can then say where ("drop dependency X (a/Project.toml:12)"). A source is
+printed as given, so `path:line` is what an editor opens.
 
 Every keyword is a constraint, and its name is the constraint's *kind*:
 
   * `compat`: per package, the set of allowed versions (queried with `in`).
-  * a kind made by [`compat_kind`](@ref Resolver.compat_kind): the same, from a
-    named source — a workspace member's `Project.toml`, say — so that a report
-    can say which compat to relax, and where. Passed as a pair, since the name
-    is not an identifier: `Problem(reqs; compat_kind("a/Project.toml") => d)`.
+  * any of these from a named source ([`sourced_kind`](@ref
+    Resolver.sourced_kind)): the same constraint, declared in one of several
+    places — a workspace member's `Project.toml`, say — so that a report can
+    say which one to relax, and where. Passed as a pair, since the name is not
+    an identifier: `Problem(reqs; sourced_kind(:compat, "a/Project.toml") => d)`.
   * `pin`: per package, the one version it is held at.
   * anything else: a predicate `(p, v) -> Bool`, true for the versions that kind
     forbids — "no prereleases" is the one the resolver's own tooling uses. These
@@ -71,13 +73,25 @@ end
 Problem(reqs::Vector{P}, constraints::AbstractDict{Symbol}) where {P} =
     Problem(reqs, constraints, EmptyDict{P,Vector{String}}())
 
-# A kind can carry the source it was declared in after an `@`: `compat@a/Project.toml`
-# is that file's compat, `drop@a/Project.toml` the dropping of a requirement it
-# makes. A kind is a symbol wherever it goes — a report is plain data, and a
-# caller rebuilding one over its own package names keeps the kinds as they are —
-# so the source rides inside the symbol, and these two read the halves back.
+# A kind can carry the place it was declared after an `@`: `compat@a/Project.toml`
+# is that file's compat. A kind is a symbol wherever it goes — a report is plain
+# data, and a caller rebuilding one over its own package names keeps the kinds
+# as they are — so the source rides inside the symbol, and `kind_base` and
+# `kind_source` read the halves back.
 const SOURCE_SEP = '@'
 
+"""
+    sourced_kind(base, source) :: Symbol
+
+The kind of a constraint of kind `base` declared at `source`: what a query
+passes when constraints of one kind come from several places and a report
+should say which one to relax, and where — "relax your compat on X
+(a/Project.toml:12)". A `Problem` takes such a kind exactly as it takes `base`,
+and each place is a constraint of its own, so a fix asks to relax exactly the
+ones that exclude what it needs. The source is printed as given, so `path:line`
+is what an editor opens. [`kind_base`](@ref Resolver.kind_base) and
+[`kind_source`](@ref Resolver.kind_source) read the halves back.
+"""
 sourced_kind(base::Symbol, source::AbstractString) = Symbol(base, SOURCE_SEP, source)
 
 # The bare kinds carry no source, and are answered by identity before the
@@ -86,6 +100,12 @@ sourced_kind(base::Symbol, source::AbstractString) = Symbol(base, SOURCE_SEP, so
 # to cost its vector and its struct and nothing else
 const BARE_KINDS = (:compat, :pin, :drop)
 
+"""
+    kind_base(kind) :: Symbol
+
+The kind a [`sourced_kind`](@ref Resolver.sourced_kind) was made from; any
+other kind is its own base.
+"""
 function kind_base(kind::Symbol)
     kind in BARE_KINDS && return kind
     s = String(kind)
@@ -93,6 +113,12 @@ function kind_base(kind::Symbol)
     return i === nothing ? kind : Symbol(SubString(s, 1, prevind(s, i)))
 end
 
+"""
+    kind_source(kind) :: Union{Nothing, String}
+
+The source a [`sourced_kind`](@ref Resolver.sourced_kind) was made from, or
+`nothing` for a kind declared in the one place there is.
+"""
 function kind_source(kind::Symbol)
     kind in BARE_KINDS && return nothing
     s = String(kind)
@@ -100,71 +126,20 @@ function kind_source(kind::Symbol)
     return i === nothing ? nothing : String(SubString(s, nextind(s, i)))
 end
 
-"""
-    compat_kind(source) :: Symbol
-
-The kind of a compat constraint from `source`: what a query passes when its
-compat comes from several places and a report should say which one to relax —
-"relax your compat on X in a/Project.toml". A `Problem` takes such a kind
-exactly as it takes `compat`, and [`compat_source`](@ref Resolver.compat_source)
-reads the source back off it.
-"""
-compat_kind(source::AbstractString) = sourced_kind(:compat, source)
-
-"""
-    is_compat_kind(kind) :: Bool
-
-Is `kind` a compat constraint: `:compat` itself or one from [`compat_kind`](@ref
-Resolver.compat_kind)?
-"""
-is_compat_kind(kind::Symbol) = kind_base(kind) === :compat
-
-"""
-    compat_source(kind) :: Union{Nothing, String}
-
-The source a compat kind was made from, or `nothing` for plain `:compat` and
-for kinds that are not compat at all.
-"""
-compat_source(kind::Symbol) = is_compat_kind(kind) ? kind_source(kind) : nothing
-
-"""
-    drop_kind(source) :: Symbol
-
-The kind of the action that drops a requirement from `source`: what a report's
-fix names for a requirement whose `Problem` said where it is required from
-("drop dependency X from a/Project.toml"). Plain `:drop` is the same action for
-a requirement that said nothing. [`drop_source`](@ref Resolver.drop_source)
-reads the source back off it.
-"""
-drop_kind(source::AbstractString) = sourced_kind(:drop, source)
-
-"""
-    is_drop_kind(kind) :: Bool
-
-Is `kind` the dropping of a requirement: `:drop` itself or one from
-[`drop_kind`](@ref Resolver.drop_kind)?
-"""
-is_drop_kind(kind::Symbol) = kind_base(kind) === :drop
-
-"""
-    drop_source(kind) :: Union{Nothing, String}
-
-The source a drop kind was made from, or `nothing` for plain `:drop` and for
-kinds that are not drops at all.
-"""
-drop_source(kind::Symbol) = is_drop_kind(kind) ? kind_source(kind) : nothing
-
 # the three ways to build one. A caller's dictionary is copied, so later
 # mutation cannot change the problem
-compat_constraint(::Type{P}, d::AbstractDict) where {P} =
+constraint(::Type{P}, ::Val{:compat}, d::AbstractDict) where {P} =
     (e = Dict(d); Constraint{P}(
         (p, v) -> (s = get(e, p, nothing); s !== nothing && v ∉ s), Set{P}(keys(e))))
-constraint(::Type{P}, ::Val{:compat}, d::AbstractDict) where {P} = compat_constraint(P, d)
 constraint(::Type{P}, ::Val{:pin}, d::AbstractDict) where {P} =
     (e = Dict(d); Constraint{P}(
         (p, v) -> (w = get(e, p, nothing); w !== nothing && v != w), Set{P}(keys(e))))
-constraint(::Type{P}, ::Val{K}, forbids) where {P,K} =
-    is_compat_kind(K) ? compat_constraint(P, forbids) : Constraint{P}(forbids, nothing)
+# a sourced kind is built as its base is: the source changes what the report
+# says, not what the constraint does
+function constraint(::Type{P}, ::Val{K}, value) where {P,K}
+    base = kind_base(K)
+    return base === K ? Constraint{P}(value, nothing) : constraint(P, Val(base), value)
+end
 
 # this constraint no longer applying to `pkgs`, or `nothing` when nothing of it
 # is left — so relaxing a kind for the packages it names relaxes it entirely,
@@ -178,11 +153,12 @@ function relax(c::Constraint{P}, pkgs) where {P}
     return Constraint{P}((p, v) -> p ∉ pkgs && forbids(p, v)::Bool, names)
 end
 
-# `compat` and `pin` are dictionaries keyed by package; every other kind is a
-# predicate. Checked once, here, so that nothing downstream has to look.
+# `compat` and `pin` are dictionaries keyed by package, from whatever source;
+# every other kind is a predicate. Checked once, here, so that nothing
+# downstream has to look.
 function check_constraints(::Type{P}, kinds::NamedTuple) where {P}
     for (kind, value) in pairs(kinds)
-        want = is_compat_kind(kind) || kind === :pin ?
+        want = kind_base(kind) in (:compat, :pin) ?
             (value isa AbstractDict{P} ? nothing : "a dictionary keyed by package ($P)") :
             (isempty(methods(value)) ? "a predicate, `(p, v) -> Bool`" : nothing)
         want === nothing || throw(ArgumentError(

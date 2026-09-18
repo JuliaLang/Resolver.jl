@@ -4,12 +4,9 @@
 resolve
 issatisfiable
 Problem
-Resolver.compat_kind
-Resolver.compat_source
-Resolver.is_compat_kind
-Resolver.drop_kind
-Resolver.drop_source
-Resolver.is_drop_kind
+Resolver.sourced_kind
+Resolver.kind_base
+Resolver.kind_source
 Diagnosis
 ```
 
