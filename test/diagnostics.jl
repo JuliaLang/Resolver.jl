@@ -2250,3 +2250,60 @@ end
     @test occursin("your pin (Manifest.toml) restricts P to p1", report)
     @test occursin("unpin P (Manifest.toml)", report)
 end
+
+@testset "diagnosis: a requirement from a named source" begin
+    # a requirement can say where it is required from, and then the heading
+    # and the fix that drops it say so. It is one action however many places
+    # list it: a requirement is one fact, and dropping it one decision
+    using Resolver: relax
+    data = Dict(
+        :R => PkgData([:r1], Dict(:r1 => [:P]), Dict(:r1 => Dict(:P => [:p2]))),
+        :P => PkgData([:p2, :p1], DEPS_NONE, COMP_NONE),
+    )
+    prob = Problem([:R => ["Sub/Project.toml:5"]]; compat = Dict(:P => [:p1]))
+    @test prob.reqs == [:R]
+    @test prob.sources == Dict(:R => ["Sub/Project.toml:5"])
+    # relaxing keeps the sources of what it still requires, and no others
+    @test relax(prob, Symbol[], Dict{Symbol,Set{Symbol}}()).sources == prob.sources
+    @test isempty(relax(prob, [:R], Dict{Symbol,Set{Symbol}}()).sources)
+    d = check_diagnosis(data, prob)
+    @test d.sources == prob.sources
+    report = sprint(show, MIME("text/plain"), d)
+    @test occursin("Conflict 1: R (Sub/Project.toml:5)\n", report)
+    @test occursin("2. drop dependency R (Sub/Project.toml:5)\n", report)
+    @test d.conflicts[1].fixes[2].actions == [Action(:drop, :R)]
+    # required from two places: still one action, and both places named
+    prob = Problem([:R => ["A/Project.toml:5", "B/Project.toml:9"]];
+                   compat = Dict(:P => [:p1]))
+    d = check_diagnosis(data, prob)
+    @test d.conflicts[1].fixes[2].actions == [Action(:drop, :R)]
+    @test occursin("drop dependency R (A/Project.toml:5, B/Project.toml:9)",
+                   sprint(show, MIME("text/plain"), d))
+    # ... so what a road not taken would cost is counted in decisions, not in
+    # places: dropping a requirement five files list is one further change
+    data = Dict(
+        :R => PkgData([:r1], Dict(:r1 => [:P]), Dict(:r1 => Dict(:P => [:p2]))),
+        :Q => PkgData([:q1], Dict(:q1 => [:P]), Dict(:q1 => Dict(:P => [:p1]))),
+        :P => PkgData([:p2, :p1], DEPS_NONE, COMP_NONE),
+    )
+    d = check_diagnosis(data, Problem([:R => ["Root/Project.toml:1"],
+                                       :Q => ["M$i/Project.toml:1" for i in 1:5]];
+                                      compat = Dict(:P => [:p1])))
+    flat = replace(sprint(show, MIME("text/plain"), d), "\n    " => " ")
+    @test occursin("relaxing your compat on P would not help unless you also " *
+                   "dropped dependency Q (M1/Project.toml:1, M2/Project.toml:1, " *
+                   "M3/Project.toml:1, M4/Project.toml:1, M5/Project.toml:1).", flat)
+    # a requirement of a package the universe holds nothing of: its place is
+    # named too
+    d = check_diagnosis(Dict(:R => PkgData(Symbol[], DEPS_NONE, COMP_NONE)),
+                        Problem([:R => ["Sub/Project.toml:5"]]))
+    report = sprint(show, MIME("text/plain"), d)
+    @test occursin("no version of R (Sub/Project.toml:5) is available.", report)
+    @test occursin("drop dependency R (Sub/Project.toml:5)", report)
+    # no sources: nothing in parentheses, as ever
+    d = check_diagnosis(data, Problem([:R]; compat = Dict(:P => [:p1])))
+    report = sprint(show, MIME("text/plain"), d)
+    @test occursin("Conflict 1: R\n", report)
+    @test occursin("drop dependency R\n", report)
+    @test isempty(d.sources)
+end

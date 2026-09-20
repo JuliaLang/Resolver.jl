@@ -28,6 +28,12 @@ which versions are admissible. A `Problem` carries everything that determines
 *satisfiability*; orderings (the `by` priority order, the `order` version rank
 order) are `resolve` parameters instead.
 
+`reqs` may instead be `pkg => sources` pairs, `sources` naming where `pkg` is
+required from — the `Project.toml` files of a workspace, say. Satisfiability
+does not depend on it; a report does, since the fix that drops the requirement
+can then say where ("drop dependency X (a/Project.toml:12)"). A source is
+printed as given, so `path:line` is what an editor opens.
+
 Every keyword is a constraint, and its name is the constraint's *kind*:
 
   * `compat`: per package, the set of allowed versions (queried with `in`).
@@ -53,12 +59,19 @@ a deletion from a private one: that is what lets a single T1 artifact (see
 [`pkg_info`](@ref Resolver.pkg_info)) serve queries that admit different things,
 and what lets diagnostics eventually name the kind that ruled a version out.
 """
-struct Problem{P, C<:AbstractDict{Symbol}}
+struct Problem{P, C<:AbstractDict{Symbol}, S<:AbstractDict{P,Vector{String}}}
     reqs :: Vector{P}
     # the constraints, by kind. Typed as a parameter so that an unconstrained
     # problem can share one immutable empty dictionary rather than make one
     constraints :: C
+    # where each requirement is required from, for the ones the query said.
+    # A parameter for the same reason: a query that said nothing, which is
+    # every convenience `resolve`, shares the empty map rather than making one
+    sources :: S
 end
+
+Problem(reqs::Vector{P}, constraints::AbstractDict{Symbol}) where {P} =
+    Problem(reqs, constraints, EmptyDict{P,Vector{String}}())
 
 # A kind can carry the place it was declared after an `@`: `compat@a/Project.toml`
 # is that file's compat. A kind is a symbol wherever it goes — a report is plain
@@ -169,6 +182,19 @@ function Problem(reqs::SetOrVec{P}; kinds...) where {P}
     return Problem(r, something(cs, EmptyDict{Symbol,Constraint{P}}()))
 end
 
+# the requirements with where each is required from: the same problem, which
+# remembers the sources for the report
+function Problem(reqs::AbstractVector{<:Pair{P}}; kinds...) where {P}
+    prob = Problem(P[first(r) for r in reqs]; kinds...)
+    sources = Dict{P,Vector{String}}()
+    for (p, srcs) in reqs
+        union!(get!(Vector{String}, sources, p), String[String(s) for s in srcs])
+    end
+    filter!(kv -> !isempty(last(kv)), sources)
+    isempty(sources) && return prob
+    return Problem(prob.reqs, prob.constraints, sources)
+end
+
 # `prob` no longer requiring `drop_reqs`, nor applying each constraint in
 # `drop_constraints` to the packages named there — a relaxation being the same problem
 # with demands lifted, and so built by lifting them
@@ -184,7 +210,9 @@ function relax(
         c′ === nothing || (cs[kind] = c′)
     end
     r = P[p for p in prob.reqs if p ∉ gone]
-    return isempty(cs) ? Problem(r, EmptyDict{Symbol,Constraint{P}}()) : Problem(r, cs)
+    srcs = Dict{P,Vector{String}}(p => s for (p, s) in prob.sources if p ∉ gone)
+    return Problem(r, isempty(cs)   ? EmptyDict{Symbol,Constraint{P}}() : cs,
+                      isempty(srcs) ? EmptyDict{P,Vector{String}}()     : srcs)
 end
 
 # does the problem constrain anything at all? the fast paths below lean on this:
