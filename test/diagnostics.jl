@@ -2243,6 +2243,17 @@ end
     flat = replace(sprint(show, MIME("text/plain"), d), "\n    " => " ")
     @test occursin("your compat (Other/Project.toml:7, Sub/Project.toml:3) restricts P to p1", flat)
     @test occursin("relax your compat on P (Other/Project.toml:7, Sub/Project.toml:3)", flat)
+    # a package every member of a large workspace holds to the same range,
+    # with a needed version outside it: every file's compat must be relaxed,
+    # and finding that must not cost a subset search over the files
+    kinds = Dict{Symbol,Any}(sourced_kind(:compat, "M$(lpad(i, 2, '0'))/Project.toml") =>
+                             Dict(:P => [:p1]) for i in 1:40)
+    t = @elapsed d = check_diagnosis(data, Problem([:R]; kinds...))
+    @test t < 5
+    c = only(d.conflicts)
+    @test Set(c.fixes[1].actions) == Set(Action(k, :P) for k in keys(kinds))
+    @test occursin("relax your compat on P (M01/Project.toml, M02/Project.toml, ",
+                   sprint(show, MIME("text/plain"), d))
     # a pin from a named source is taken the same way
     pinned = sourced_kind(:pin, "Manifest.toml")
     d = check_diagnosis(data, Problem([:R]; pinned => Dict(:P => :p1)))

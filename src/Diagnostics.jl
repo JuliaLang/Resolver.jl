@@ -2159,56 +2159,56 @@ end
 # universe can be asked about — so the cheapest lift is the smallest set of
 # kinds restoring every class the full lift would, and among those the one
 # whose best restored version is best.
+#
+# A class comes back once every kind excluding some member of it is lifted, so
+# what restores it is one of its members' exclusion sets, and a lift restoring
+# every class is a union of one such choice per class. A smallest lift is such
+# a union, and among the smallest so is the one whose best restored version is
+# best (any kind outside every exclusion set it covers could be dropped), so
+# the search is over those unions and nothing else. Subsets of the kinds were
+# searched before, which is exponential in how many kinds the query has on `p`
+# — one per file where a workspace's members each declare a compat — and a
+# package every member holds to the same range needs all of them lifted, which
+# was the last subset of the last size.
 function lift_actions(prob::Problem{P}, sat::SAT{P,V}, univ::Universe{P,V},
                       p::P) where {P,V}
     info = sat.info[p]
     reps = univ.reps[p]
     vs = info.versions
     excl = Vector{Symbol}[exclusion_kinds(prob, p, v) for v in vs]
-    kinds = Symbol[]
-    for ks in excl, k in ks
-        k in kinds || push!(kinds, k)
+    # per dead class, what restoring it could take: its members' exclusion
+    # sets, one of which the lift must cover; a class with a member no kind
+    # excludes is not the query's to restore and asks nothing
+    choices = Vector{Vector{Symbol}}[
+        unique!(Vector{Symbol}[excl[j] for j in info.members[c]])
+        for c in eachindex(reps) if iszero(reps[c])]
+    filter!(cs -> !any(isempty, cs), choices)
+    # the classes that leave no choice first, so that what they fix is fixed
+    # before anything branches
+    sort!(choices; by = length)
+    # smaller first, then the lift admitting the best excluded version, then
+    # the kinds themselves: what a version is admitted by is the lift covering
+    # everything that excludes it
+    function key(S::Vector{Symbol})
+        j = findfirst(j -> !isempty(excl[j]) && excl[j] ⊆ S, eachindex(vs))
+        return (length(S), something(j, length(vs) + 1), S)
     end
-    sort!(kinds)
-    dead = Int[c for c in eachindex(reps) if iszero(reps[c])]
-    admits(S, j) = isempty(setdiff(excl[j], S))
-    back(S) = Set{Int}(c for c in dead if any(j -> admits(S, j), info.members[c]))
-    full = back(kinds)
-    best = Symbol[]
-    for size = 1:length(kinds)
-        bestkey = nothing
-        for S in subsets(kinds, size)
-            back(S) == full || continue
-            j = findfirst(j -> admits(S, j) && !isempty(excl[j]), eachindex(vs))
-            key = (something(j, length(vs) + 1), S)
-            bestkey === nothing || key < bestkey || continue
-            best, bestkey = S, key
+    best = nothing
+    function search(i::Int, S::Vector{Symbol})
+        best !== nothing && length(S) > best[1] && return
+        if i > length(choices)
+            k = key(S)
+            (best === nothing || k < best) && (best = k)
+            return
         end
-        isempty(best) || break
-    end
-    isempty(best) && (best = kinds)
-    return Action{P}[Action(k, p) for k in best]
-end
-
-# the size-`k` subsets of `v`, in order
-function subsets(v::Vector{T}, k::Int) where {T}
-    out = Vector{T}[]
-    n = length(v)
-    k > n && return out
-    idx = collect(1:k)
-    while true
-        push!(out, T[v[i] for i in idx])
-        i = k
-        while i ≥ 1 && idx[i] == n - k + i
-            i -= 1
-        end
-        i == 0 && break
-        idx[i] += 1
-        for j = i+1:k
-            idx[j] = idx[j-1] + 1
+        any(E -> E ⊆ S, choices[i]) && return search(i + 1, S)
+        for E in choices[i]
+            search(i + 1, sort!(union(S, E)))
         end
     end
-    return out
+    search(1, Symbol[])
+    lift = best === nothing ? Symbol[] : best[3]
+    return Action{P}[Action(k, p) for k in lift]
 end
 
 fix_actions(prob::Problem{P}, sat::SAT{P,V}, univ::Universe{P,V},
