@@ -28,8 +28,7 @@ module Diagnostics
 using ..Resolver: Resolver, SAT, Problem, PkgInfo, Universe, PicoSAT, Relation,
     nclasses, installed_lit, forbidden_lit, sat_assume_var, sat_solve,
     sat_new_variable, sat_add_var, sat_add, with_classes_relaxed,
-    with_temp_clauses, exclusion_kinds, relax, resolve, DepsProvider, PkgData,
-    is_excluded
+    with_temp_clauses, exclusion_kinds, kind_base, kind_source, relax, resolve, DepsProvider, PkgData, is_excluded
 using ..Resolver.Clauses: Clauses, Clause, Lit, literal, clause, packages,
     isbottom, subsumes, absent, present, resolve_raw, resolve_on, clause_phrase,
     range_phrase, selected, unselected, nversions, version_order
@@ -2646,35 +2645,76 @@ end
 One action, said as something the reader could carry out. Whatever a constraint
 kind is called inside the resolver, what it reads as here is an edit.
 """
-function action_phrase(a::Action)
-    a.kind === :drop && return "drop dependency $(a.pkg)"
-    a.kind === :compat && return "relax your compat on $(a.pkg)"
-    a.kind === :pin && return "unpin $(a.pkg)"
-    return "allow $(a.kind) versions of $(a.pkg)"
+action_phrase(a::Action) = action_phrase(kind_base(a.kind), a.pkg, kind_sources(a.kind))
+
+# the three forms of one action, each over a kind, the package, and the places
+# it was declared: to do, being tried, and done
+function action_phrase(kind::Symbol, pkg, srcs)
+    kind === :drop && return "drop dependency $pkg$(paren(srcs))"
+    kind === :compat && return "relax your compat on $pkg$(paren(srcs))"
+    kind === :pin && return "unpin $pkg$(paren(srcs))"
+    return "allow $kind versions of $pkg$(paren(srcs))"
+end
+
+# the same action, said as the thing tried rather than the thing to do: a
+# blocked entry reports on a road not taken
+function action_gerund(kind::Symbol, pkg, srcs)
+    kind === :drop && return "dropping dependency $pkg$(paren(srcs))"
+    kind === :compat && return "relaxing your compat on $pkg$(paren(srcs))"
+    kind === :pin && return "unpinning $pkg$(paren(srcs))"
+    return "allowing $kind versions of $pkg$(paren(srcs))"
+end
+
+# ... and as the thing that would have had to happen as well: the completion
+# an "unless you also" names
+function action_past(kind::Symbol, pkg, srcs)
+    kind === :drop && return "dropped dependency $pkg$(paren(srcs))"
+    kind === :compat && return "relaxed your compat on $pkg$(paren(srcs))"
+    kind === :pin && return "unpinned $pkg$(paren(srcs))"
+    return "allowed $kind versions of $pkg$(paren(srcs))"
+end
+
+# Where something was declared, said in parentheses after it, as the query
+# gave it: a caller that passes `path:line` gets what an editor opens, and a
+# query that said nothing gets nothing.
+paren(srcs) = isempty(srcs) ? "" : " (" * join(srcs, ", ") * ")"
+
+# the places a kind carries: the one inside a sourced kind, or none
+kind_sources(kind::Symbol) =
+    (s = kind_source(kind); s === nothing ? String[] : String[s])
+
+# Actions said together, `say` being one of the three forms above. Actions of
+# one kind on one package from several places — the compat on X in two files —
+# are one thing to do, said once with every place named: "relax your compat on
+# X (a, b)".
+function actions_phrase(say::Function, actions::AbstractVector{Action{P}}) where {P}
+    groups = Tuple{Symbol,P,Vector{String}}[]
+    for a in actions
+        base = kind_base(a.kind)
+        i = findfirst(g -> g[1] === base && g[2] == a.pkg, groups)
+        i === nothing && (push!(groups, (base, a.pkg, String[])); i = length(groups))
+        union!(groups[i][3], kind_sources(a.kind))
+    end
+    return String[say(base, pkg, srcs) for (base, pkg, srcs) in groups]
+end
+
+# the constraint kinds a line rests on, as the reader's own: one phrase per
+# kind whatever the places it was declared in, "your compat (a, b) and your pin"
+function your_phrases(kinds::Vector{Symbol})
+    bases = Symbol[]
+    srcs = Dict{Symbol,Vector{String}}()
+    for k in kinds
+        b = kind_base(k)
+        b in bases || push!(bases, b)
+        union!(get!(Vector{String}, srcs, b), kind_sources(k))
+    end
+    return String["your $b$(paren(srcs[b]))" for b in bases]
 end
 
 join_and(xs) = join(xs, ", ", " and ")
 join_or(xs) = join(xs, ", ", " or ")
 
-# the same action, said as the thing tried rather than the thing to do: a
-# blocked entry reports on a road not taken
-function action_gerund(a::Action)
-    a.kind === :drop && return "dropping dependency $(a.pkg)"
-    a.kind === :compat && return "relaxing your compat on $(a.pkg)"
-    a.kind === :pin && return "unpinning $(a.pkg)"
-    return "allowing $(a.kind) versions of $(a.pkg)"
-end
-
-# ... and as the thing that would have had to happen as well: the completion
-# an "unless you also" names
-function action_past(a::Action)
-    a.kind === :drop && return "dropped dependency $(a.pkg)"
-    a.kind === :compat && return "relaxed your compat on $(a.pkg)"
-    a.kind === :pin && return "unpinned $(a.pkg)"
-    return "allowed $(a.kind) versions of $(a.pkg)"
-end
-
-fix_phrase(f::Fix) = join_and(String[action_phrase(a) for a in f.actions])
+fix_phrase(f::Fix) = join_and(actions_phrase(action_phrase, f.actions))
 
 # The requirements a conflict's heading names: the ones it answers for, which
 # are its reason's own. Every conflict reads under an implicit "given the rest
@@ -2779,9 +2819,10 @@ function constraint_phrase(c::Conflict{P,V}, p::P, l::Line{P}) where {P,V}
         k in kinds || push!(kinds, k)
     end
     sort!(kinds)
-    lead = join(String["your $k" for k in kinds], " and ")
+    yours = your_phrases(kinds)
+    lead = join(yours, " and ")
     # every verb below is regular, so agreement is one suffix
-    s = length(kinds) > 1 ? "" : "s"
+    s = length(yours) > 1 ? "" : "s"
     m = l.clause[p]
     sel = selected(m)
     any(sel) || return "$lead eliminate$s all versions of $p"
@@ -3151,7 +3192,7 @@ function print_layer(io::IO, pkgs, layer::Vector{Vector{Fix{P,V}}},
         print_wrapped(io, menu_phrase(menu), indent * "• ", indent * "  ")
         for f in menu
             prefix = length(menu) == 1 ? "allows: " :
-                join_and(String[action_gerund(a) for a in f.actions]) *
+                join_and(actions_phrase(action_gerund, f.actions)) *
                 " allows: "
             print_allows(io, pkgs, f, indent * "  "; prefix)
         end
@@ -3168,8 +3209,8 @@ end
 function alternative_label(d::Diagnosis{P,V}, a::Alternative{P,V}) where {P,V}
     isempty(a.avoided) && return "Or, to fix another way:"
     if all(i -> length(d.conflicts[i].fixes) == 1, a.avoided)
-        gs = String[action_gerund(x) for i in a.avoided
-                    for x in only(d.conflicts[i].fixes).actions]
+        gs = actions_phrase(action_gerund, Action{P}[
+            x for i in a.avoided for x in only(d.conflicts[i].fixes).actions])
         # "without A or B" is neither, where "without A and B" leaves the
         # reader to decide whether the "and" is inside the "without"
         return "Or, to fix without " * join_or(gs) * ":"
@@ -3195,7 +3236,7 @@ function print_alternative(io::IO, d::Diagnosis{P,V},
     singles = Vector{Fix{P,V}}[m for m in a.menus if length(m) == 1]
     choices = Vector{Fix{P,V}}[m for m in a.menus if length(m) > 1]
     acts = unique!(Action{P}[x for m in singles for x in only(m).actions])
-    joint = join_and(String[action_phrase(x) for x in acts])
+    joint = join_and(actions_phrase(action_phrase, acts))
     if isempty(choices)
         print_wrapped(io, joint, "  ", "  ")
         print_allows(io, pkgs, only(first(a.menus)), "  ")
@@ -3223,8 +3264,8 @@ whole diagnosis knows about the repairs that cost more than the ones it offers,
 which is what a menu of one is entitled to say about itself; `alone` says
 whether this conflict's menu is the whole of what settles its block, which an
 alternative to that block denies. `also` is a package to name in the heading
-beside the requirements, which a page whose
-heading would otherwise repeat another's is given (`heading_extras`).
+beside the requirements, which a page whose heading would otherwise repeat
+another's is given (`heading_extras`).
 """
 function print_conflict(io::IO, c::Conflict{P,V}, index = nothing;
                         others::Symbol = :some, alone::Bool = true,
@@ -3278,7 +3319,7 @@ function print_blocked(io::IO, c::Conflict{P,V}) where {P,V}
     single || println(io, "  Note:")
     for (bundles, unless) in c.blocks
         acts = Action{P}[a for b in bundles for a in b]
-        tried = join_and(String[action_gerund(a) for a in acts])
+        tried = join_and(actions_phrase(action_gerund, acts))
         # a completion turns the flat refusal into the whole truth: what it
         # would take for this road to go somewhere; several tempting actions
         # exhibiting one repair are said once, as the choice they are not --
@@ -3289,11 +3330,11 @@ function print_blocked(io::IO, c::Conflict{P,V}) where {P,V}
         # whether or not it prints
         long = length(unless) > UNLESS_NAMED
         lead = if length(bundles) > 1
-            roads = join_or(String[action_gerund(a) for a in acts])
+            roads = join_or(actions_phrase(action_gerund, acts))
             quantity = length(acts) == 2 ? "both" : "all of them"
             also = isempty(unless) ? "" :
                 long ? " and $(length(unless)) other changes" :
-                " and also " * join_and(String[action_past(a) for a in unless])
+                " and also " * join_and(actions_phrase(action_past, unless))
             "$roads would only help if you do $quantity$also."
         elseif isempty(unless)
             help = length(acts) > 1 ? "do not help" : "does not help"
@@ -3301,7 +3342,7 @@ function print_blocked(io::IO, c::Conflict{P,V}) where {P,V}
         elseif long
             "$tried would not help without $(length(unless)) other changes."
         else
-            also = join_and(String[action_past(a) for a in unless])
+            also = join_and(actions_phrase(action_past, unless))
             "$tried would not help unless you also $also."
         end
         single ? print_wrapped(io, lead, "  Note: ", "    ") :
@@ -3540,8 +3581,8 @@ function report_problems(d::Diagnosis{P,V}; prob = nothing,
             i == j && continue
             if sels[i] == sels[j]
                 i < j && push!(bad, "$tag: offers " *
-                    join_and(String[action_phrase(a) for a in sort!(
-                        collect(sels[i]); by = a -> (string(a.pkg), a.kind))]) *
+                    join_and(actions_phrase(action_phrase, sort!(
+                        collect(sels[i]); by = a -> (string(a.pkg), a.kind)))) *
                     " twice")
             elseif sels[i] ⊆ sels[j]
                 push!(bad, "$tag: one of the fixes offered is inside another")
@@ -3559,7 +3600,7 @@ function report_problems(d::Diagnosis{P,V}; prob = nothing,
         all(g -> any(s -> Set{Action{P}}(s) ⊆ u, block_selections(d, g)),
             groups) || continue
         push!(bad, "conflict $n: the completion " *
-              join_and(String[action_phrase(a) for a in unless]) *
+              join_and(actions_phrase(action_phrase, unless)) *
               " repairs on its own")
     end
     # (V7) each printed request is one the page has verified: its witness takes

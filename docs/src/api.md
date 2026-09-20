@@ -4,6 +4,9 @@
 resolve
 issatisfiable
 Problem
+Resolver.sourced_kind
+Resolver.kind_base
+Resolver.kind_source
 Diagnosis
 ```
 

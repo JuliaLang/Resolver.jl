@@ -2191,3 +2191,62 @@ end
     @test occursin("→ would allow: Q 3, X 1", flat)
     @test occursin("→ would allow: R 2, X 1", flat)
 end
+
+@testset "diagnosis: a compat from a named source" begin
+    # a compat can come from one of several places -- a workspace member's
+    # Project.toml, say -- and then the report names the place to edit, as the
+    # query gave it: a `path:line` is what an editor opens
+    using Resolver: sourced_kind, kind_base, kind_source
+    sub = sourced_kind(:compat, "Sub/Project.toml:3")
+    @test kind_base(sub) === :compat && kind_source(sub) == "Sub/Project.toml:3"
+    @test kind_base(:compat) === :compat && kind_source(:compat) === nothing
+    @test kind_base(:pin) === :pin && kind_source(:pin) === nothing
+    data = Dict(
+        :R => PkgData([:r1], Dict(:r1 => [:P]), Dict(:r1 => Dict(:P => [:p2]))),
+        :P => PkgData([:p2, :p1], DEPS_NONE, COMP_NONE),
+    )
+    # the kind constrains exactly as `compat` does, under its own name
+    prob = Problem([:R]; sub => Dict(:P => [:p1]))
+    @test is_excluded(prob, :P, :p2) && !is_excluded(prob, :P, :p1)
+    @test exclusion_kinds(prob, :P, :p2) == [sub]
+    d = check_diagnosis(data, prob)
+    @test sprint(show, MIME("text/plain"), d) == """
+        Unsatisfiable — 1 conflict:
+
+        Conflict 1: R
+          • R r1 requires P p2
+          • your compat (Sub/Project.toml:3) restricts P to p1
+          Fix it by any one of:
+            1. relax your compat on P (Sub/Project.toml:3)
+               → allows: P p2, R r1
+            2. drop dependency R
+          Upstream fix: a release of R supporting P p1 would fix this; r1, its latest,
+            supports only p2.
+            → would allow: P p1
+        """
+    # two sources on one package: only the one excluding the version R needs
+    # is on the page, and only it is asked to relax
+    other = sourced_kind(:compat, "Other/Project.toml:7")
+    d = check_diagnosis(data, Problem([:R]; sub => Dict(:P => [:p1]),
+                                             other => Dict(:P => [:p2, :p1])))
+    report = sprint(show, MIME("text/plain"), d)
+    @test occursin("your compat (Sub/Project.toml:3) restricts P to p1", report)
+    @test occursin("relax your compat on P (Sub/Project.toml:3)", report)
+    @test !occursin("Other/Project.toml", report)
+    # ... and where both exclude it, both are: one action per place, since
+    # each is a constraint of its own, said as one phrase naming both
+    d = check_diagnosis(data, Problem([:R]; sub => Dict(:P => [:p1]),
+                                             other => Dict(:P => [:p1])))
+    c = only(d.conflicts)
+    @test Set(c.fixes[1].actions) == Set([Action(sub, :P), Action(other, :P)])
+    @test c.fixes[1].solution == Dict(:P => :p2, :R => :r1)
+    flat = replace(sprint(show, MIME("text/plain"), d), "\n    " => " ")
+    @test occursin("your compat (Other/Project.toml:7, Sub/Project.toml:3) restricts P to p1", flat)
+    @test occursin("relax your compat on P (Other/Project.toml:7, Sub/Project.toml:3)", flat)
+    # a pin from a named source is taken the same way
+    pinned = sourced_kind(:pin, "Manifest.toml")
+    d = check_diagnosis(data, Problem([:R]; pinned => Dict(:P => :p1)))
+    report = sprint(show, MIME("text/plain"), d)
+    @test occursin("your pin (Manifest.toml) restricts P to p1", report)
+    @test occursin("unpin P (Manifest.toml)", report)
+end

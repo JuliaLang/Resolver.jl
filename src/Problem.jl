@@ -31,6 +31,11 @@ order) are `resolve` parameters instead.
 Every keyword is a constraint, and its name is the constraint's *kind*:
 
   * `compat`: per package, the set of allowed versions (queried with `in`).
+  * any of these from a named source ([`sourced_kind`](@ref
+    Resolver.sourced_kind)): the same constraint, declared in one of several
+    places — a workspace member's `Project.toml`, say — so that a report can
+    say which one to relax, and where. Passed as a pair, since the name is not
+    an identifier: `Problem(reqs; sourced_kind(:compat, "a/Project.toml") => d)`.
   * `pin`: per package, the one version it is held at.
   * anything else: a predicate `(p, v) -> Bool`, true for the versions that kind
     forbids — "no prereleases" is the one the resolver's own tooling uses. These
@@ -55,6 +60,59 @@ struct Problem{P, C<:AbstractDict{Symbol}}
     constraints :: C
 end
 
+# A kind can carry the place it was declared after an `@`: `compat@a/Project.toml`
+# is that file's compat. A kind is a symbol wherever it goes — a report is plain
+# data, and a caller rebuilding one over its own package names keeps the kinds
+# as they are — so the source rides inside the symbol, and `kind_base` and
+# `kind_source` read the halves back.
+const SOURCE_SEP = '@'
+
+"""
+    sourced_kind(base, source) :: Symbol
+
+The kind of a constraint of kind `base` declared at `source`: what a query
+passes when constraints of one kind come from several places and a report
+should say which one to relax, and where — "relax your compat on X
+(a/Project.toml:12)". A `Problem` takes such a kind exactly as it takes `base`,
+and each place is a constraint of its own, so a fix asks to relax exactly the
+ones that exclude what it needs. The source is printed as given, so `path:line`
+is what an editor opens. [`kind_base`](@ref Resolver.kind_base) and
+[`kind_source`](@ref Resolver.kind_source) read the halves back.
+"""
+sourced_kind(base::Symbol, source::AbstractString) = Symbol(base, SOURCE_SEP, source)
+
+# The bare kinds carry no source, and are answered by identity before the
+# symbol is read as a string: reading it allocates, `check_constraints` asks
+# for every kind of every `Problem`, and an unconstrained problem is promised
+# to cost its vector and its struct and nothing else
+const BARE_KINDS = (:compat, :pin, :drop)
+
+"""
+    kind_base(kind) :: Symbol
+
+The kind a [`sourced_kind`](@ref Resolver.sourced_kind) was made from; any
+other kind is its own base.
+"""
+function kind_base(kind::Symbol)
+    kind in BARE_KINDS && return kind
+    s = String(kind)
+    i = findfirst(==(SOURCE_SEP), s)
+    return i === nothing ? kind : Symbol(SubString(s, 1, prevind(s, i)))
+end
+
+"""
+    kind_source(kind) :: Union{Nothing, String}
+
+The source a [`sourced_kind`](@ref Resolver.sourced_kind) was made from, or
+`nothing` for a kind declared in the one place there is.
+"""
+function kind_source(kind::Symbol)
+    kind in BARE_KINDS && return nothing
+    s = String(kind)
+    i = findfirst(==(SOURCE_SEP), s)
+    return i === nothing ? nothing : String(SubString(s, nextind(s, i)))
+end
+
 # the three ways to build one. A caller's dictionary is copied, so later
 # mutation cannot change the problem
 constraint(::Type{P}, ::Val{:compat}, d::AbstractDict) where {P} =
@@ -63,7 +121,12 @@ constraint(::Type{P}, ::Val{:compat}, d::AbstractDict) where {P} =
 constraint(::Type{P}, ::Val{:pin}, d::AbstractDict) where {P} =
     (e = Dict(d); Constraint{P}(
         (p, v) -> (w = get(e, p, nothing); w !== nothing && v != w), Set{P}(keys(e))))
-constraint(::Type{P}, ::Val{K}, forbids) where {P,K} = Constraint{P}(forbids, nothing)
+# a sourced kind is built as its base is: the source changes what the report
+# says, not what the constraint does
+function constraint(::Type{P}, ::Val{K}, value) where {P,K}
+    base = kind_base(K)
+    return base === K ? Constraint{P}(value, nothing) : constraint(P, Val(base), value)
+end
 
 # this constraint no longer applying to `pkgs`, or `nothing` when nothing of it
 # is left — so relaxing a kind for the packages it names relaxes it entirely,
@@ -77,11 +140,12 @@ function relax(c::Constraint{P}, pkgs) where {P}
     return Constraint{P}((p, v) -> p ∉ pkgs && forbids(p, v)::Bool, names)
 end
 
-# `compat` and `pin` are dictionaries keyed by package; every other kind is a
-# predicate. Checked once, here, so that nothing downstream has to look.
+# `compat` and `pin` are dictionaries keyed by package, from whatever source;
+# every other kind is a predicate. Checked once, here, so that nothing
+# downstream has to look.
 function check_constraints(::Type{P}, kinds::NamedTuple) where {P}
     for (kind, value) in pairs(kinds)
-        want = kind in (:compat, :pin) ?
+        want = kind_base(kind) in (:compat, :pin) ?
             (value isa AbstractDict{P} ? nothing : "a dictionary keyed by package ($P)") :
             (isempty(methods(value)) ? "a predicate, `(p, v) -> Bool`" : nothing)
         want === nothing || throw(ArgumentError(
