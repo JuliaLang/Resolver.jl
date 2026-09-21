@@ -199,6 +199,11 @@ end
     @test isempty(a.constraints)
     @test !haskey(a.constraints, :compat)
     @test get(a.constraints, :pin, nothing) === nothing
+    # and so is the map of where requirements are required from, for a query
+    # that said nothing about it
+    @test a.sources === b.sources
+    @test isempty(a.sources)
+    @test get(a.sources, :A, nothing) === nothing
     # the mask dictionary of an unconstrained problem is shared the same way
     nocomp = Dict{Symbol,Dict{Symbol,Vector{Symbol}}}()
     info = pkg_info(Dict(:A => PkgData([:v1], Dict{Symbol,Vector{Symbol}}(), nocomp)),
