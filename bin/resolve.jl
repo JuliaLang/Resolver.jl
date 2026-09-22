@@ -30,10 +30,12 @@ usage: $PROGRAM_FILE [options] [<project path>]
   --unfix=[<pkgs>]        undo (override) previous fix options
 
   --max[=<pkgs>]          maximize version number
+  --max-patch[=<pkgs>]    maximize major.minor.patch (minimize build)
   --max-minor[=<pkgs>]    maximize major.minor (minimize patch)
   --max-major[=<pkgs>]    maximize major (minimize minor.patch)
 
   --min[=<pkgs>]          minimize version number
+  --min-patch[=<pkgs>]    minimize major.minor.patch (maximize build)
   --min-minor[=<pkgs>]    minimize major.minor (maximize patch)
   --min-major[=<pkgs>]    minimize major (maximize minor.patch)
 
@@ -57,8 +59,8 @@ parse_opts!(ARGS, split("""
     print-manifest print-versions
     julia allow-pre allow-yanked extra-deps prioritize
     fix fix-minor fix-major unfix
-    max max-minor max-major
-    min min-minor min-major
+    max max-patch max-minor max-major
+    min min-patch min-minor min-major
 """))
 
 length(ARGS) ≤ 1 || usage("At most one project can be specified.")
@@ -84,7 +86,7 @@ const PROJ = length(ARGS) ≥ 1 ? expand_project(ARGS[1]) : Base.active_project(
 
 include("Registries.jl")
 
-import Base: SHA1, UUID, thismajor, thisminor
+import Base: SHA1, UUID, thismajor, thisminor, thispatch
 import Pkg
 import Pkg.Operations: record_project_hash, download_source
 if isdefined(Pkg.Operations, :fixups_from_projectfile!)
@@ -368,7 +370,7 @@ handle_opts(r"^(allow_(pre|yanked)|(un)?fix|max|min)") do opt, val
             dict[uuid] = false
         end
         filter!(∉(pkgs), FIXED)
-    elseif opt in (:max, :max_minor, :max_major, :min, :min_minor, :min_major)
+    elseif opt in (:max, :max_patch, :max_minor, :max_major, :min, :min_patch, :min_minor, :min_major)
         for uuid in pkgs
             ORDER_MAP[uuid] = opt
         end
@@ -411,6 +413,10 @@ end
 function level_order(level::Symbol) :: Function
     level == :min && return (u::VersionNumber, v::VersionNumber) -> u < v
     level == :max && return (u::VersionNumber, v::VersionNumber) -> u > v
+    level == :min_patch && return (u::VersionNumber, v::VersionNumber) ->
+      thispatch(u) ≠ thispatch(v) ? thispatch(u) < thispatch(v) : u > v
+    level == :max_patch && return (u::VersionNumber, v::VersionNumber) ->
+        thispatch(u) ≠ thispatch(v) ? thispatch(u) > thispatch(v) : u < v
     level == :min_minor && return (u::VersionNumber, v::VersionNumber) ->
         thisminor(u) ≠ thisminor(v) ? thisminor(u) < thisminor(v) : u > v
     level == :max_minor && return (u::VersionNumber, v::VersionNumber) ->
