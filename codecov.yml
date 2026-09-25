@@ -1,0 +1,16 @@
+# A coverage drop smaller than this does not fail a pull request.
+#
+# Coverage here is noisy by construction. Thirty-three test sets seed the global
+# RNG from `RandomDevice`, so every CI run generates different package universes
+# and reaches a different set of branches in `src/`. Runs over an unchanged
+# `src/` have differed by 8 lines of 3986 -- 0.2% -- and without a threshold
+# that noise fails pull requests that changed nothing measurable.
+#
+# `patch` is deliberately left strict. It measures only the lines a pull request
+# itself touches, where a shortfall means new code with no test rather than a
+# different sample of the same code.
+coverage:
+  status:
+    project:
+      default:
+        threshold: 0.5%
