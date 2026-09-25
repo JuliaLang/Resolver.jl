@@ -414,7 +414,7 @@ function level_order(level::Symbol) :: Function
     level == :min && return (u::VersionNumber, v::VersionNumber) -> u < v
     level == :max && return (u::VersionNumber, v::VersionNumber) -> u > v
     level == :min_patch && return (u::VersionNumber, v::VersionNumber) ->
-      thispatch(u) ≠ thispatch(v) ? thispatch(u) < thispatch(v) : u > v
+        thispatch(u) ≠ thispatch(v) ? thispatch(u) < thispatch(v) : u > v
     level == :max_patch && return (u::VersionNumber, v::VersionNumber) ->
         thispatch(u) ≠ thispatch(v) ? thispatch(u) > thispatch(v) : u < v
     level == :min_minor && return (u::VersionNumber, v::VersionNumber) ->
