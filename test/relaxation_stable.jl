@@ -307,7 +307,6 @@ end
 end
 
 @testset "a permutation stored as what it displaces" begin
-    Random.seed!(rand(RandomDevice(), UInt64))
     # the identity displaces nothing, which is every package a relaxation left
     # alone and every package at all when it moved none
     @test collect(SparsePerm(5, Tuple{Int,Int}[])) == 1:5
@@ -360,7 +359,6 @@ end
 end
 
 @testset "one instance, many relaxations, no residue" begin
-    Random.seed!(rand(RandomDevice(), UInt64))
     for (m, n) in ((2, 3), (3, 2), (3, 3), (2, 4))
         make_deps, make_comp, data, d, c = tiny_data_makers(m, n)
         fill_data!(m, n, make_deps(randbits(d)), make_comp(randbits(c)), data)

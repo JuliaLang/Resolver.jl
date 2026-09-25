@@ -467,7 +467,6 @@ end
 end
 
 @testset "Problem: exclusion kinds are ordinary constraints" begin
-    Random.seed!(rand(RandomDevice(), UInt64))
     # A kind that forbids a random version subset per package must behave
     # exactly like the compat entries that forbid the same versions, and (by
     # bake-equivalence) exactly like deleting them from the data. Swept over the
@@ -544,7 +543,6 @@ end
 end
 
 @testset "Problem: bake equivalence, complete data grids" begin
-    Random.seed!(rand(RandomDevice(), UInt64))
     # every dependency & compatibility pattern of the smallest grids, with
     # random user constraints on top of each
     for m = 1:2, n = 1:2
@@ -568,7 +566,6 @@ end
 end
 
 @testset "Problem: bake equivalence, exhaustive constraint shapes" begin
-    Random.seed!(rand(RandomDevice(), UInt64))
     hi = p -> p  # default priority: lower package id first
     lo = p -> -p # reversed priority
     # every constraint shape on every package, on random data
@@ -594,7 +591,6 @@ end
 end
 
 @testset "Problem: bake equivalence, random grids" begin
-    Random.seed!(rand(RandomDevice(), UInt64))
     hi = p -> p
     lo = p -> -p
     for (m, n) in ((2, 4), (4, 2), (2, 5), (5, 2), (3, 3))
@@ -614,7 +610,6 @@ end
 end
 
 @testset "Problem: bake equivalence, adversarial" begin
-    Random.seed!(rand(RandomDevice(), UInt64))
     # the adversarial generator from the main suite, but resolving a
     # constrained problem: break the solution until it is unsolvable, with
     # user constraints in force the whole way

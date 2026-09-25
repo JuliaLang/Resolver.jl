@@ -224,7 +224,6 @@ end
 end
 
 @testset "classes: reference partition, random grids" begin
-    Random.seed!(rand(RandomDevice(), UInt64))
     for (m, n) in ((2, 3), (3, 2), (2, 4), (3, 3), (4, 2), (2, 5), (5, 2))
         make_deps, make_comp, data, d, c = tiny_data_makers(m, n)
         for _ = 1:150
@@ -236,7 +235,6 @@ end
 end
 
 @testset "resolve vs. the oracles: complete data grids" begin
-    Random.seed!(rand(RandomDevice(), UInt64))
     hi = p -> p
     lo = p -> -p
     for m = 1:2, n = 1:2
@@ -262,7 +260,6 @@ end
 end
 
 @testset "resolve vs. the oracles: random grids" begin
-    Random.seed!(rand(RandomDevice(), UInt64))
     hi = p -> p
     lo = p -> -p
     for (m, n) in ((2, 4), (4, 2), (2, 5), (5, 2), (3, 3))
@@ -280,7 +277,6 @@ end
 end
 
 @testset "resolve vs. the oracles: constraints that empty classes" begin
-    Random.seed!(rand(RandomDevice(), UInt64))
     hi = p -> p
     lo = p -> -p
     splits = 0
@@ -303,7 +299,6 @@ end
 end
 
 @testset "resolve vs. the oracles: exhaustive constraint shapes" begin
-    Random.seed!(rand(RandomDevice(), UInt64))
     hi = p -> p
     lo = p -> -p
     for (m, n) in ((2, 2), (2, 3), (3, 2))
@@ -326,7 +321,6 @@ end
 end
 
 @testset "resolve vs. the oracles: adversarial" begin
-    Random.seed!(rand(RandomDevice(), UInt64))
     # break the solution until it is unsolvable, with constraints in force the
     # whole way, checking the answer against the oracles at every step
     for m = 2:4, n = 2:3
@@ -369,7 +363,6 @@ permute_versions(data::AbstractDict, perms) = Dict(
     for (p, data_p) in data)
 
 @testset "classes: T1 is independent of the version ordering" begin
-    Random.seed!(rand(RandomDevice(), UInt64))
     for (m, n) in ((2, 3), (3, 3), (3, 2), (2, 4), (4, 2))
         make_deps, make_comp, data, d, c = tiny_data_makers(m, n)
         for _ = 1:20
@@ -395,7 +388,6 @@ permute_versions(data::AbstractDict, perms) = Dict(
 end
 
 @testset "T1: all requirements vs. requirement-specific" begin
-    Random.seed!(rand(RandomDevice(), UInt64))
     # `pkg_info(deps)` — every package required — is the persistable artifact.
     # Resolving any requirement set against it must give what resolving against
     # the closure of those requirements alone gives: the per-resolve filter is

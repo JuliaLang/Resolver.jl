@@ -390,7 +390,6 @@ end
 ## randomized sweep over tiny instances
 
 @testset "unsat cores: brute-force reference on tiny data" begin
-    Random.seed!(rand(RandomDevice(), UInt64))
     for m = 2:3, n = 2:3
         make_deps, make_comp, data, d, c = tiny_data_makers(m, n)
         for _ = 1:15

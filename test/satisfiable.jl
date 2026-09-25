@@ -172,7 +172,6 @@ end
     # verdict: orderings select among the valid solutions rather than deciding
     # which ones are valid. Sweep the tiny grids under both, constrained and
     # not, and check the one verdict against every `resolve` in sight.
-    Random.seed!(rand(RandomDevice(), UInt64))
     hi = p -> p
     lo = p -> -p
     up = p -> (u, v) -> u > v # prefer the *lowest* version

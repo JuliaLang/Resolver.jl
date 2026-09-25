@@ -78,7 +78,6 @@ function redundancy_only(info, prob)
 end
 
 @testset "precondition 1: no user constraint reaches a matrix" begin
-    Random.seed!(rand(RandomDevice(), UInt64))
     # A constrained query and an unconstrained one make the same universe out
     # of an artifact, up to the class order the representatives put the rows
     # in: the same partition, the same rows and columns, the same conflicts.
@@ -166,7 +165,6 @@ end
 end
 
 @testset "precondition 2c: swept" begin
-    Random.seed!(rand(RandomDevice(), UInt64))
     # Two properties of the redundancy pass, over the tiny grids with random
     # constraints on top.
     #
@@ -599,7 +597,6 @@ end
 end
 
 @testset "shadows: swept" begin
-    Random.seed!(rand(RandomDevice(), UInt64))
     # Two properties of the shadow lists over the tiny grids with random
     # constraints on top.
     #

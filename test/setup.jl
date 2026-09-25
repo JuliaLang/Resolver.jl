@@ -2,6 +2,18 @@ using Resolver
 using Random
 using Test
 
+# One seed for the whole suite, so a failure can be reproduced by running it
+# again. From Julia 1.11 `Test` also resets the default RNG to the last `seed!`
+# state at the start of every testset, so each one draws from this same stream
+# whatever ran before it -- which is why one seed here is enough, and why no
+# testset can shift what another sees.
+#
+# The value is the one this suite pinned before December 2023, chosen then for
+# hitting cases that had previously failed. Edit it to explore elsewhere: the
+# randomized testsets check `resolve` against brute-force oracles, so any seed
+# is a valid run and a different one is a different sample.
+Random.seed!(0x8cb0074336f2d04f)
+
 @isdefined(includet) ? includet("tiny_data.jl") : include("tiny_data.jl")
 @isdefined(includet) ? includet("registry.jl")  : include("registry.jl")
 

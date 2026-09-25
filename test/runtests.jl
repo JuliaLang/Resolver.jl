@@ -22,7 +22,6 @@ include("setup.jl")
 end
 
 @testset "small tests, semi-full" begin
-    Random.seed!(rand(RandomDevice(), UInt64))
     for m = 2:3, n = 2:3
         m == n && continue # fully tested or too large
         make_deps, make_comp, data, d, c = tiny_data_makers(m, n)
@@ -54,7 +53,6 @@ end
 end
 
 @testset "small tests, random" begin
-    Random.seed!(rand(RandomDevice(), UInt64))
     for m = 2:5, n = 2:5
         16 < (m*n)^2 ≤ 128 || continue
         make_deps, make_comp, data, d, c = tiny_data_makers(m, n)
@@ -70,7 +68,6 @@ end
 end
 
 @testset "medium tests, adversarial" begin
-    Random.seed!(rand(RandomDevice(), UInt64))
     for m = 2:5, n = 1:5
         (m*n)^2 ≤ 128 || continue
         make_deps, make_comp, data, d, c, bit = tiny_data_makers(m, n)
@@ -124,7 +121,6 @@ end
 end
 
 @testset "resolve: brute-force reference" begin
-    Random.seed!(rand(RandomDevice(), UInt64))
     hi = p -> p  # default priority: lower package id first
     lo = p -> -p # reversed priority
     for m = 1:3, n = 1:3
