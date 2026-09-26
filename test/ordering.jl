@@ -103,7 +103,6 @@ end
 end
 
 @testset "ordering: comparator vs. baked, complete data grids" begin
-    Random.seed!(rand(RandomDevice(), UInt64))
     hi = p -> p
     lo = p -> -p
     for m = 1:2, n = 1:2
@@ -129,7 +128,6 @@ end
 end
 
 @testset "ordering: comparator vs. baked, random grids" begin
-    Random.seed!(rand(RandomDevice(), UInt64))
     hi = p -> p
     lo = p -> -p
     for (m, n) in ((2, 3), (3, 2), (3, 3), (2, 4), (4, 2), (2, 5), (5, 2))
@@ -156,7 +154,6 @@ end
 end
 
 @testset "ordering: comparator vs. baked, exhaustive constraint shapes" begin
-    Random.seed!(rand(RandomDevice(), UInt64))
     hi = p -> p
     lo = p -> -p
     for (m, n) in ((2, 2), (2, 3), (3, 2))
@@ -180,7 +177,6 @@ end
 end
 
 @testset "ordering: one T1 artifact serves every ordering" begin
-    Random.seed!(rand(RandomDevice(), UInt64))
     # The universality claim, at the level the cache will be used: build the
     # all-requirements artifact once, then resolve it under several orderings
     # and several constraint sets, cross-checking each against a from-scratch

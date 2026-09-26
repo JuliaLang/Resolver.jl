@@ -2,6 +2,8 @@ using Resolver
 using Random
 using Test
 
+Random.seed!(0)
+
 @isdefined(includet) ? includet("tiny_data.jl") : include("tiny_data.jl")
 @isdefined(includet) ? includet("registry.jl")  : include("registry.jl")
 

@@ -1831,7 +1831,6 @@ end
 ## sweeps
 
 @testset "diagnosis: verified fixes over generated data" begin
-    Random.seed!(rand(RandomDevice(), UInt64))
     diagnoses = fixes = relaxations = 0
     for (m, n) in ((2, 2), (2, 3), (3, 2), (3, 3), (2, 4), (4, 2))
         make_deps, make_comp, data, d, c = tiny_data_makers(m, n)
@@ -1859,7 +1858,6 @@ end
 end
 
 @testset "diagnosis: verified fixes under a version ordering" begin
-    Random.seed!(rand(RandomDevice(), UInt64))
     diagnosed = 0
     up = p -> (u, v) -> u > v # prefer the lowest version
     for (m, n) in ((2, 3), (3, 2), (3, 3))

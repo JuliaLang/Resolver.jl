@@ -146,7 +146,6 @@ end
 end
 
 @testset "a class is empty iff every member of it is excluded" begin
-    Random.seed!(rand(RandomDevice(), UInt64))
     empties = classes = shared = partial = 0
     for (m, n) in ((2, 2), (2, 3), (3, 2), (3, 3), (2, 4), (4, 2), (2, 5))
         make_deps, make_comp, data, d, c = tiny_data_makers(m, n)
@@ -207,7 +206,6 @@ end
 ## the literals and the lift
 
 @testset "the frame's literals are the ones the accessors name" begin
-    Random.seed!(rand(RandomDevice(), UInt64))
     deactivated = 0
     for (m, n) in ((2, 2), (2, 3), (3, 2), (3, 3))
         make_deps, make_comp, data, d, c = tiny_data_makers(m, n)
@@ -237,7 +235,6 @@ end
 end
 
 @testset "the frame lift round-trips" begin
-    Random.seed!(rand(RandomDevice(), UInt64))
     lifted = freed = 0
     for (m, n) in ((2, 2), (2, 3), (3, 2), (3, 3))
         make_deps, make_comp, data, d, c = tiny_data_makers(m, n)
