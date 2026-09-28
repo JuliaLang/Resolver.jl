@@ -5,6 +5,17 @@ on:
     branches:
       - main
     tags: '*'
+
+# Take the registry from the eager Pkg server flavor. The default,
+# conservative, lags the registry by up to an hour, and bin/ does not resolve
+# here: it instantiates committed manifests that pin exact versions. So a
+# manifest refreshed against a just-registered package names a version the
+# conservative flavor cannot yet see, and CI fails for a version skew that has
+# nothing to do with the change. Eager sees what whoever ran
+# bin/update_manifests.jl saw.
+env:
+  JULIA_PKG_SERVER_REGISTRY_PREFERENCE: eager
+
 jobs:
   test:
     name: Julia ${{ matrix.version }} - ${{ matrix.os }} - ${{ matrix.arch }} - ${{ github.event_name }}
