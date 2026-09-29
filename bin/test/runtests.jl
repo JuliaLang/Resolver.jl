@@ -659,6 +659,50 @@ end
         end
     end
 
+    # Drift has two causes and one of them cannot be fixed here, so the advice
+    # has to say which. Nothing on a healthy tree reaches these branches -- the
+    # check passes and prints none of them -- so they are asserted directly.
+    # Julia 1.13.1 drifted while the pin was already the newest release, and the
+    # script sent the reader to bin/update_manifests.jl, which could not have
+    # helped.
+    @testset "drift advice says whose job the fix is" begin
+        # a subprocess, as the resolve.jl tests do: the script is guarded so
+        # including it defines `refresh_advice` without running the check
+        script = """
+            include($(repr(normpath(joinpath(@__DIR__, "..", "check_stdlibs.jl")))))
+            for a in ((v"1.13.1", v"2.0.7", v"2.0.8"),
+                      (v"1.13.1", v"2.0.8", v"2.0.8"),
+                      (v"1.13.1", v"2.0.8", nothing))
+                println("---8<---")
+                println(refresh_advice(a...))
+            end"""
+        out = IOBuffer()
+        julia = Base.julia_cmd()[1]
+        @test success(pipeline(`$julia --project=$BIN_PROJECT -e $script`;
+                              stdout = out, stderr = devnull))
+        parts = split(String(take!(out)), "---8<---"; keepempty = false)
+        @test length(parts) == 3
+        # matched over unwrapped text: these are paragraphs, and where a phrase
+        # falls across a line break is not something a test should care about
+        behind, current, unknown =
+            (strip(replace(p, r"\s+" => " ")) for p in parts)
+        # all three name the Julia they are about
+        for text in (behind, current, unknown)
+            @test occursin("julia 1.13.1", text)
+        end
+        # a pin behind the registry is refreshed here, and says so
+        @test occursin("update_manifests.jl", behind)
+        @test occursin("2.0.8 is newer than the pinned 2.0.7", behind)
+        @test !occursin("upstream", behind)
+        # a pin already current is not, and does not pretend otherwise
+        @test occursin("would change nothing", current)
+        @test occursin("hole in the upstream data", current)
+        @test occursin("Update Historical Stdlibs", current)
+        # unreadable registries admit it rather than guessing either way
+        @test occursin("could not be read", unknown)
+        @test occursin("unknown", unknown)
+    end
+
     # The Julia universe is not a query parameter either: the provider offers
     # *every* Julia version, along with every stdlib version any of them bundles,
     # and the `--julia` / project bound is an ordinary compat entry on `julia`. The
