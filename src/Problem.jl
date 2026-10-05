@@ -18,6 +18,8 @@ Base.getindex(::EmptyDict, key) = throw(KeyError(key))
 struct Constraint{P}
     forbids :: Any                     # (p, v) -> Bool
     named   :: Union{Nothing, Set{P}}  # the packages it names, or every package
+    # no default outer constructor: `P` is unbound when `named` is `nothing`
+    Constraint{P}(forbids, named) where {P} = new{P}(forbids, named)
 end
 
 """
