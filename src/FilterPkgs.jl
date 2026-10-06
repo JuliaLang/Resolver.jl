@@ -888,6 +888,20 @@ function mark_necessary!(
         ]
         partners[p] = sort!(prt)
     end
+    return mark_necessary_kernel!(infos, ncls, partners, deacts, kqv, k0v)
+end
+
+# Share the pruning loop across dictionary and rank representations. Setup
+# above converts both to the same array types, so keep this call out of line.
+@noinline function mark_necessary_kernel!(
+    infos :: Vector{PkgInfo{P,V}},
+    ncls :: Vector{Int},
+    partners :: Vector{Vector{NTuple{3,Int}}},
+    deacts :: Vector{Union{Nothing,BitVector}},
+    kqv :: Vector{Union{Nothing,Vector{Int}}},
+    k0v :: Vector{Union{Nothing,Vector{Int}}},
+) where {P,V}
+    N = length(infos)
     # some work buffers
     A = UInt64[]        # candidate class mask
     D = UInt64[]        # per-class domination candidate masks
