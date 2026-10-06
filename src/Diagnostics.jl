@@ -2061,8 +2061,10 @@ function analyse(
     # tempting — and a fact *is* one action of the page's vocabulary, since the
     # two facts a package can have differ in kind, one asking that the
     # requirement be dropped and the other that the query's limits be lifted.
-    cover = Set{Int}(x for s in secs for L in s.layers for m in L
-                       for o in m for x in o)
+    cover = Set{Int}()
+    for s in secs, L in s.layers, m in L, o in m
+        union!(cover, o)
+    end
 
     selectors = sort!(collect(keys(satx.why)))
     owner = Int[]
