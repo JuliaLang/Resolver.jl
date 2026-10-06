@@ -2533,11 +2533,10 @@ function upstream_probe(deps::DepsProvider{P,D}, base, prob::Problem{P},
     # the release's own data is a `PkgData` of its own type — same versions,
     # same dependencies, a compat map rebuilt — so the provider answers in
     # whatever both it and the rest of the registry are
-    prov = DepsProvider{P,typejoin(D, typeof(over)),typeof(release)}(
-        deps.packages, release)
+    prov = DepsProvider{P,typejoin(D, typeof(over))}(deps.packages, release)
     drop_reqs, drop_constraints = withdrawal(settle)
-    sol = resolve(prov, relax(prob, drop_reqs, drop_constraints);
-                  by, order, diagnose = false, upstream = false)
+    sol = Resolver.resolve_undiagnosed(prov, relax(prob, drop_reqs, drop_constraints);
+                                       by, order)
     sol === nothing && return nothing
     get(sol, p, nothing) == v || return nothing
     w = get(sol, q, nothing)
@@ -3658,7 +3657,7 @@ end
 
 # the package data for one package, from whichever shape of it the checker was
 # handed — the same two `resolve` itself takes
-pkg_data_of(data::DepsProvider{P}, p::P) where {P} = data.provider(p)
+pkg_data_of(data::DepsProvider{P,D}, p::P) where {P,D} = data.provider(p)::D
 pkg_data_of(data::AbstractDict{P,<:PkgData{P}}, p::P) where {P} = data[p]
 
 # (V7), of one conflict's upstream fixes
