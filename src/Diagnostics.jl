@@ -2459,7 +2459,7 @@ function diagnose(
     for i in eachindex(plan.owner)
         n = plan.owner[i]
         L = first(alayers[n])
-        mi = findfirst(==(length(gone) + i), mine[n])
+        mi = findfirst(==(length(gone) + i), mine[n])::Int
         fixes = menu_fixes(L, mi, elsewhere(n, 0))
         blocks = Tuple{Vector{Vector{Action{P}}},Vector{Action{P}}}[
             (Vector{Action{P}}[fix_actions(prob, sat, univ, facts[x])
@@ -3708,7 +3708,7 @@ function report_problems(d::Diagnosis{P,V}; prob = nothing,
             if sels[i] == sels[j]
                 i < j && push!(bad, "$tag: offers " *
                     join_and(actions_phrase(action_phrase, sort!(
-                        collect(sels[i]); by = a -> (string(a.pkg), a.kind)),
+                        collect(sels[i])::Vector{<:Action}; by = a -> (string(a.pkg), a.kind)),
                         d.sources)) *
                     " twice")
             elseif sels[i] ⊆ sels[j]
