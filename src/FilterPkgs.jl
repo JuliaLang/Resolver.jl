@@ -112,8 +112,8 @@ ordering of *classes* it induces, which is
 [`class_ranking`](@ref Resolver.class_ranking)'s business.
 """
 version_permutations(
-    info  :: AbstractDict{P, PkgInfo{P,V}},
-    order :: Nothing,
+    _info  :: AbstractDict{P, PkgInfo{P,V}},
+    _order :: Nothing,
 ) where {P,V} = nothing
 
 function version_permutations(
@@ -561,8 +561,7 @@ function find_reachable(
     k0    :: Dict{P, Vector{Int}},
     tb    = reach_tables(info),
 ) where {P,V}
-    pkgs, N, ix, infos, ncls, deps, partners =
-        tb.pkgs, tb.N, tb.ix, tb.infos, tb.ncls, tb.deps, tb.partners
+    pkgs, N, infos, ncls = tb.pkgs, tb.N, tb.infos, tb.ncls
 
     # ---------------------------------------------------------------- layout
     # Everything per-class is flat: `coff[p]` offsets the key arrays, `soff[p]`
@@ -966,7 +965,7 @@ end
         # matter — it is still in the universe, so the conflict still
         # counts, and the flag it is read from does not know about
         # deactivation precisely so that it does
-        for (q, b, c) in partners[p]
+        for (q, b, _) in partners[p]
             Y = infos[q].conflicts
             for k = 1:ncls[q]
                 X[m+1, b+k] &= Y[k, end]
@@ -1200,7 +1199,7 @@ end
         end
         # deactivate redundant classes
         X[R, end] .= false
-        for (q, b, c) in partners[p]
+        for (q, _, c) in partners[p]
             infos[q].conflicts[ncls[q] + 1, c .+ R] .= false
             if !inwork[q] # can create new redundancies
                 inwork[q] = true
@@ -1306,7 +1305,6 @@ end
 @noinline function drop_unmarked_pkg(info_p::PkgInfo{P}, I, K, N, A) where {P}
     # abbreviate components
     V = info_p.versions
-    C = info_p.classes
     M = info_p.members
     S = info_p.shadows
     D = info_p.depends

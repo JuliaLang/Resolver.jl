@@ -25,14 +25,14 @@ implements, including the proof of every claim above.
 """
 module Diagnostics
 
-using ..Resolver: Resolver, SAT, Problem, PkgInfo, Universe, PicoSAT, Relation,
+using ..Resolver: Resolver, SAT, Problem, Universe, PicoSAT, Relation,
     nclasses, installed_lit, forbidden_lit, sat_assume_var, sat_solve,
     sat_new_variable, sat_add_var, sat_add, with_classes_relaxed,
     with_temp_clauses, exclusion_kinds, kind_base, kind_source, EmptyDict,
     relax, resolve, DepsProvider, PkgData, is_excluded
 using ..Resolver.Clauses: Clauses, Clause, Lit, literal, clause, packages,
-    isbottom, subsumes, absent, present, resolve_raw, resolve_on, clause_phrase,
-    range_phrase, selected, unselected, nversions, version_order
+    isbottom, subsumes, absent, resolve_raw, resolve_on, clause_phrase,
+    range_phrase, selected, nversions, version_order
 using ..Resolver.UnsatCores: sat_mus
 
 export Diagnosis, Conflict, Alternative, Fix, Action, Line, Upstream,
@@ -3096,17 +3096,17 @@ end
 # that saying it moves the chain on. Where the chain has reached all of them the
 # statement closes at its own pivot, and where it has reached none the pivot
 # leads — as a statement standing in no chain would.
-function unit_subject(u::Vector{Line{P}}, seen::Set{P}, vers) where {P}
+function unit_subject(u::Vector{Line{P}}, seen::Set{P}) where {P}
     length(u) ≥ 2 && return u[1].pivot
     l = only(u)
     unseen = P[q for q in packages(l.clause) if q ∉ seen]
     length(unseen) == 1 && return unseen[1]
     if isempty(unseen)
         return l.pivot === nothing ?
-            Clauses.default_subject(l.clause, vers) : l.pivot
+            Clauses.default_subject(l.clause) : l.pivot
     end
     l.pivot !== nothing && l.pivot in unseen && return l.pivot
-    d = Clauses.default_subject(l.clause, vers)
+    d = Clauses.default_subject(l.clause)
     return d in unseen ? d : unseen[1]
 end
 
@@ -3219,7 +3219,7 @@ function print_chain(io::IO, c::Conflict{P,V}, given::Vector{Line{P}},
         k === nothing && (k = 1)
         u = units[pending[k]]
         deleteat!(pending, k)
-        s = unit_subject(u, seen, vers)
+        s = unit_subject(u, seen)
         for q in unit_sources(u)
             q == s || reach(q)
         end

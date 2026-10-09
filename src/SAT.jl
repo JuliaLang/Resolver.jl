@@ -281,7 +281,7 @@ function SAT(
             n_p = nclasses(info_p)
             v_p = vars[p]
             l_p = get(lads, p, 0)
-            for (q, b) in info_p.interacts
+            for q in keys(info_p.interacts)
                 p < q || continue # conflicts are symmetrical
                 info_q = info[q]
                 n_q = nclasses(info_q)
@@ -585,7 +585,7 @@ end
 # A relaxation moves few packages, and few of the classes of the ones it moves.
 # Both sparsities are one fact, and `SparsePerm` is both: the map holds an entry
 # only for a package that moved, and that entry holds only the classes that did.
-ranking(::Nothing, p, m::Int) = Base.OneTo(m)
+ranking(::Nothing, _, m::Int) = Base.OneTo(m)
 ranking(ord::Dict{P,SparsePerm}, p::P, m::Int) where {P} =
     get(ord, p, Base.OneTo(m))
 
