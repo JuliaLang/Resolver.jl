@@ -363,12 +363,20 @@ end
 # `resolve(deps, prob; diagnose = false, upstream = false)`, which is what an
 # upstream probe asks. Not `resolve` itself: inference would meet that again
 # inside its own probes, and the cycle widens the argument types it compiles
-# the whole pipeline for, so the pipeline would be compiled twice
+# the whole pipeline for, so the pipeline would be compiled twice. Nor
+# `resolve_prepared`, whose answer is a solution or a diagnosis by the value of
+# a flag: solving here makes a solution or `nothing` all it can return, which
+# its types then say without anyone having to assert it
 function resolve_undiagnosed(deps::DepsProvider{P}, prob::Problem{P};
                              by::Function = identity, order = nothing) where {P}
     info = pkg_info(deps, prob)
-    return resolve_prepared(prepare_pkg_info(info, prob, info; order), prob;
-        by, order, diagnose = false)
+    # single-use, as in `resolve_prepared`: there is no state to restore
+    sat = SAT(prepare_pkg_info(info, prob, info; order))
+    try
+        return resolve(sat, prob.reqs; by, restore = false)
+    finally
+        finalize(sat)
+    end
 end
 
 # What the package data adds to a diagnosis, and only it can: for each
