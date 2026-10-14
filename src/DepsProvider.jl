@@ -61,5 +61,10 @@ function DepsProvider(
     DepsProvider{P,D}(packages, provider)
 end
 
-pkg_data(deps::DepsProvider{P,D}, pkg::P) where {P,D<:PkgData} =
+# the package data for one package, from either shape of it `resolve` takes. Its
+# own name, not a method of `pkg_data`: that one takes a collection of packages,
+# and the two told apart by type alone would be one call wherever the package
+# type can itself be a collection (`P = Any`, say)
+pkg_data_of(deps::DepsProvider{P,D}, pkg::P) where {P,D<:PkgData} =
     deps.provider(pkg)::D
+pkg_data_of(data::AbstractDict{P,<:PkgData{P}}, pkg::P) where {P} = data[pkg]

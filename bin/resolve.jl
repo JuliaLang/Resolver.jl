@@ -521,7 +521,7 @@ function yanked_notes()
         # asking the provider for the package both fills in what it dropped and
         # says what it kept, so the note doesn't depend on whether the resolve
         # happened to reach this package
-        kept = Resolver.pkg_data(reg, uuid).versions
+        kept = Resolver.pkg_data_of(reg, uuid).versions
         dropped = get(yanked_dropped, uuid, nothing)
         dropped === nothing && continue
         admitted = sort!([v for v in dropped if v ∈ spec])

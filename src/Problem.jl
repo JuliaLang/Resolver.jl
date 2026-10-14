@@ -6,9 +6,9 @@
 struct EmptyDict{K,V} <: AbstractDict{K,V} end
 
 Base.length(::EmptyDict) = 0
-Base.iterate(::EmptyDict, state...) = nothing
-Base.haskey(::EmptyDict, key) = false
-Base.get(::EmptyDict, key, default) = default
+Base.iterate(::EmptyDict, _...) = nothing
+Base.haskey(::EmptyDict, _) = false
+Base.get(::EmptyDict, _, default) = default
 Base.getindex(::EmptyDict, key) = throw(KeyError(key))
 
 # What a constraint is made of matters only where it is built. Everywhere else

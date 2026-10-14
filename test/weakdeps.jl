@@ -21,7 +21,8 @@
 # on it, so every installable package is already reached. A weak target that
 # nothing else pulls in cannot be installed, and its bound cannot apply.
 
-using Resolver: Problem, PkgData, DepsProvider, resolve, issatisfiable, pkg_data
+using Resolver: Problem, PkgData, DepsProvider, resolve, issatisfiable, pkg_data,
+    pkg_data_of
 using Pkg.Versions: VersionSpec
 
 # A package with one version per entry of `spec`, where each entry is
@@ -142,7 +143,7 @@ end
                 w in registry.EXCLUDES && continue
                 w in prov.packages || continue
                 # a version of e covered by this entry, and known to the provider
-                data = try pkg_data(prov, e.name) catch; return nothing end
+                data = try pkg_data_of(prov, e.name) catch; return nothing end
                 for v in data.versions
                     v in r || continue
                     haskey(data.compat, v) || continue

@@ -25,14 +25,14 @@ implements, including the proof of every claim above.
 """
 module Diagnostics
 
-using ..Resolver: Resolver, SAT, Problem, PkgInfo, Universe, PicoSAT, Relation,
+using ..Resolver: Resolver, SAT, Problem, Universe, PicoSAT, Relation,
     nclasses, installed_lit, forbidden_lit, sat_assume_var, sat_solve,
     sat_new_variable, sat_add_var, sat_add, with_classes_relaxed,
     with_temp_clauses, exclusion_kinds, kind_base, kind_source, EmptyDict,
-    relax, resolve, DepsProvider, PkgData, is_excluded
+    relax, resolve, DepsProvider, PkgData, pkg_data_of, is_excluded
 using ..Resolver.Clauses: Clauses, Clause, Lit, literal, clause, packages,
-    isbottom, subsumes, absent, present, resolve_raw, resolve_on, clause_phrase,
-    range_phrase, selected, unselected, nversions, version_order
+    isbottom, subsumes, absent, resolve_raw, resolve_on, clause_phrase,
+    range_phrase, selected, nversions, version_order
 using ..Resolver.UnsatCores: sat_mus
 
 export Diagnosis, Conflict, Alternative, Fix, Action, Line, Upstream,
@@ -836,8 +836,8 @@ function eliminate_one(items::Vector{Item{P}}, q::P, budget::Ref{Int}) where {P}
     end
     isempty(hit) && return out
     length(hit) > ELIM_ARITY && return nothing
-    sets = minimal_emptying(BitVector[hit[i].clause[q].bits for i in eachindex(hit)],
-                            budget)
+    sets = minimal_emptying(
+        BitVector[(hit[i].clause[q]::Lit).bits for i in eachindex(hit)], budget)
     sets === nothing && return nothing
     for S in sets
         r = resolve_raw(Clause{P}[hit[i].clause for i in S], q)
@@ -1755,7 +1755,7 @@ function meet_at(
     end
     base = trues(nv + 1)
     for i in on_pivot
-        base .&= fcl[i][pivot].bits
+        base .&= (fcl[i][pivot]::Lit).bits
     end
     # trim to an irredundant family, dropping the sides that cost most to read
     # first; nothing that matters can be lost this way, since every fact of the
@@ -1787,7 +1787,7 @@ function meet_at(
         for i in reason
             (m >> bit[i]) & 1 == 1 || continue
             p = facts[i].pkg
-            b = fcl[i][p].bits
+            b = (fcl[i][p]::Lit).bits
             haskey(ant, p) ? (ant[p] .&= b) : (ant[p] = copy(b))
         end
         pairs = Pair{P,Lit}[p => Lit(.~b) for (p, b) in ant]
@@ -2378,7 +2378,7 @@ function diagnose(
     for i in eachindex(plan.owner)
         n = plan.owner[i]
         L = first(alayers[n])
-        mi = findfirst(==(length(gone) + i), mine[n])
+        mi = findfirst(==(length(gone) + i), mine[n])::Int
         fixes = menu_fixes(L, mi, elsewhere(n, 0))
         blocks = Tuple{Vector{Vector{Action{P}}},Vector{Action{P}}}[
             (Vector{Action{P}}[fix_actions(prob, sat, univ, facts[x])
@@ -2859,7 +2859,7 @@ function constraint_phrase(c::Conflict{P,V}, p::P, l::Line{P}) where {P,V}
     lead = join(yours, " and ")
     # every verb below is regular, so agreement is one suffix
     s = length(yours) > 1 ? "" : "s"
-    m = l.clause[p]
+    m = l.clause[p]::Lit
     sel = selected(m)
     any(sel) || return "$lead eliminate$s all versions of $p"
     @assert all(sel[i] for (i, _) in get(c.shadows, p, ())) """
@@ -2953,7 +2953,7 @@ function given_facts(c::Conflict{P,V}, given::Vector{Line{P}}) where {P,V}
         p = ps[1]
         is_heading_fact(c, l) && continue
         p in order || push!(order, p)
-        if !haskey(con, p) && absent(l.clause[p]) && haskey(c.excluded, p)
+        if !haskey(con, p) && absent(l.clause[p]::Lit) && haskey(c.excluded, p)
             con[p] = l
         else
             push!(get!(Vector{Line{P}}, extra, p), l)
@@ -3015,17 +3015,17 @@ end
 # that saying it moves the chain on. Where the chain has reached all of them the
 # statement closes at its own pivot, and where it has reached none the pivot
 # leads — as a statement standing in no chain would.
-function unit_subject(u::Vector{Line{P}}, seen::Set{P}, vers) where {P}
+function unit_subject(u::Vector{Line{P}}, seen::Set{P}) where {P}
     length(u) ≥ 2 && return u[1].pivot
     l = only(u)
     unseen = P[q for q in packages(l.clause) if q ∉ seen]
     length(unseen) == 1 && return unseen[1]
     if isempty(unseen)
         return l.pivot === nothing ?
-            Clauses.default_subject(l.clause, vers) : l.pivot
+            Clauses.default_subject(l.clause) : l.pivot
     end
     l.pivot !== nothing && l.pivot in unseen && return l.pivot
-    d = Clauses.default_subject(l.clause, vers)
+    d = Clauses.default_subject(l.clause)
     return d in unseen ? d : unseen[1]
 end
 
@@ -3138,7 +3138,7 @@ function print_chain(io::IO, c::Conflict{P,V}, given::Vector{Line{P}},
         k === nothing && (k = 1)
         u = units[pending[k]]
         deleteat!(pending, k)
-        s = unit_subject(u, seen, vers)
+        s = unit_subject(u, seen)
         for q in unit_sources(u)
             q == s || reach(q)
         end
@@ -3627,7 +3627,7 @@ function report_problems(d::Diagnosis{P,V}; prob = nothing,
             if sels[i] == sels[j]
                 i < j && push!(bad, "$tag: offers " *
                     join_and(actions_phrase(action_phrase, sort!(
-                        collect(sels[i]); by = a -> (string(a.pkg), a.kind)),
+                        collect(sels[i])::Vector{<:Action}; by = a -> (string(a.pkg), a.kind)),
                         d.sources)) *
                     " twice")
             elseif sels[i] ⊆ sels[j]
@@ -3662,11 +3662,6 @@ function report_problems(d::Diagnosis{P,V}; prob = nothing,
     end
     return bad
 end
-
-# the package data for one package, from whichever shape of it the checker was
-# handed — the same two `resolve` itself takes
-pkg_data_of(data::DepsProvider{P,D}, p::P) where {P,D} = data.provider(p)::D
-pkg_data_of(data::AbstractDict{P,<:PkgData{P}}, p::P) where {P} = data[p]
 
 # (V7), of one conflict's upstream fixes
 function upstream_problems(c::Conflict{P,V}, prob, data) where {P,V}

@@ -112,8 +112,8 @@ ordering of *classes* it induces, which is
 [`class_ranking`](@ref Resolver.class_ranking)'s business.
 """
 version_permutations(
-    info  :: AbstractDict{P, PkgInfo{P,V}},
-    order :: Nothing,
+    _info  :: AbstractDict{P, PkgInfo{P,V}},
+    _order :: Nothing,
 ) where {P,V} = nothing
 
 function version_permutations(
@@ -209,8 +209,8 @@ function class_ranking_keys(
     excl = exclusion_masks(info, prob)
     reps = Dict{P, Vector{Int}}()
     perms′ = Dict{P, SparsePerm}()
-    keys_q = want_keys ? Dict{P, Vector{Int}}() : nothing
-    keys_0 = want_keys ? Dict{P, Vector{Int}}() : nothing
+    # `(key_Q, key_∅)` per package, when wanted
+    ranks = want_keys ? (Dict{P, Vector{Int}}(), Dict{P, Vector{Int}}()) : nothing
     ord = Int[] # scratch: the class order, read out into a `SparsePerm`
     key = Int[] # scratch: per class, the rank of the member it competes at
     key0 = Int[] # scratch: per class, the rank of its best member, period
@@ -257,7 +257,7 @@ function class_ranking_keys(
             cperm = SparsePerm(m, moved)
             perms′[p] = cperm
         end
-        if want_keys
+        if ranks !== nothing
             # key_∅: the rank of each class's best member, exclusions ignored
             resize!(key0, m)
             fill!(key0, 0)
@@ -266,12 +266,11 @@ function class_ranking_keys(
                 key0[j] == 0 || continue
                 key0[j] = r
             end
-            keys_q[p] = cperm === nothing ? copy(key) : key[cperm]
-            keys_0[p] = cperm === nothing ? copy(key0) : key0[cperm]
+            ranks[1][p] = cperm === nothing ? copy(key) : key[cperm]
+            ranks[2][p] = cperm === nothing ? copy(key0) : key0[cperm]
         end
     end
-    return reps, isempty(perms′) ? nothing : perms′,
-        want_keys ? (keys_q, keys_0) : nothing
+    return reps, isempty(perms′) ? nothing : perms′, ranks
 end
 
 """
@@ -561,8 +560,7 @@ function find_reachable(
     k0    :: Dict{P, Vector{Int}},
     tb    = reach_tables(info),
 ) where {P,V}
-    pkgs, N, ix, infos, ncls, deps, partners =
-        tb.pkgs, tb.N, tb.ix, tb.infos, tb.ncls, tb.deps, tb.partners
+    pkgs, N, infos, ncls = tb.pkgs, tb.N, tb.infos, tb.ncls
 
     # ---------------------------------------------------------------- layout
     # Everything per-class is flat: `coff[p]` offsets the key arrays, `soff[p]`
@@ -969,7 +967,7 @@ end
         # matter — it is still in the universe, so the conflict still
         # counts, and the flag it is read from does not know about
         # deactivation precisely so that it does
-        for (q, b, c) in partners[p]
+        for (q, b, _) in partners[p]
             Y = infos[q].conflicts
             for k = 1:ncls[q]
                 X[m+1, b+k] &= Y[k, end]
@@ -1023,8 +1021,8 @@ end
         # package; `S[(k-1)*W+1 : k*W]` is the mask of the classes at position
         # k and later, and the block at k = m+1 is empty.
         kq_p = kqv[p]
-        k0_p = k0v[p]
         if kq_p !== nothing
+            k0_p = k0v[p]::Vector{Int} # set wherever `kq_p` is
             ord = sortperm(k0_p)
             resize!(k0s, m)
             for k = 1:m
@@ -1203,7 +1201,7 @@ end
         end
         # deactivate redundant classes
         X[R, end] .= false
-        for (q, b, c) in partners[p]
+        for (q, _, c) in partners[p]
             infos[q].conflicts[ncls[q] + 1, c .+ R] .= false
             if !inwork[q] # can create new redundancies
                 inwork[q] = true
@@ -1309,7 +1307,6 @@ end
 @noinline function drop_unmarked_pkg(info_p::PkgInfo{P}, I, K, N, A) where {P}
     # abbreviate components
     V = info_p.versions
-    C = info_p.classes
     M = info_p.members
     S = info_p.shadows
     D = info_p.depends
