@@ -913,6 +913,10 @@ end
 # this reason's core happened to need
 const TIGHTEN_CLASSES = 24
 
+# the same limit for `widen_support`, which runs once per printed side rather
+# than once per candidate pivot
+const WIDEN_CLASSES = 1024
+
 # how many of each enumeration is worth having. The reason walk is exponential
 # and the repair enumeration can be too; both truncate, and truncation is
 # disclosed rather than hidden (a conflict simply explains fewer of the reasons
@@ -1038,6 +1042,54 @@ function tighten!(sat::SAT{P,V}, bits::BitVector, pivot::P,
         end
     end
     return bits
+end
+
+# A fresh literal that, assumed, holds `p` outside `bits`. A class the literal
+# splits stays choosable, which only makes the question easier to satisfy.
+function deny_lit!(sat::SAT{P,V}, p::P, bits::BitVector) where {P,V}
+    z = sat_new_variable(sat)
+    sat_add_var(sat, -z)
+    info = sat.info[p]
+    for c = 1:nclasses(info)
+        all(j -> bits[j], info.members[c]) && continue
+        sat_add_var(sat, -forbidden_lit(sat, p, c))
+    end
+    bits[end] || sat_add_var(sat, -installed_lit(sat, p))
+    sat_add(sat)
+    return z
+end
+
+# A side is stated from its support, so its literal on a package the query
+# limits is the complement of what the query left — what was asked, not what
+# the registry says. Read towards that package the side then says "everything
+# but what you asked for", which moves with the query. So drop from the literal
+# each version the registry rules out with the rest of the side denied; only
+# versions go, and a literal is never emptied.
+function widen_support(sat::SAT{P,V}, cl::Clause{P}, pivot::P) where {P,V}
+    length(cl.lits) ≥ 2 || return cl
+    bits = Dict{P,BitVector}(p => copy(m.bits) for (p, m) in cl.lits)
+    for (q, _) in cl.lits
+        q == pivot && continue
+        info = sat.info[q]
+        nclasses(info) ≤ WIDEN_CLASSES || continue
+        b = bits[q]
+        any(@view b[1:end-1]) || continue
+        trial = copy(b)
+        with_temp_clauses(sat) do
+            rest = Int[deny_lit!(sat, p, bits[p]) for (p, _) in cl.lits if p != q]
+            for c = 1:nclasses(info)
+                mem = info.members[c]
+                any(j -> trial[j], mem) || continue
+                assuming(sat, Int[rest; -forbidden_lit(sat, q, c)]) && continue
+                for j in mem
+                    trial[j] = false
+                end
+            end
+        end
+        any(trial) && (bits[q] = trial)
+    end
+    out = clause(Pair{P,Lit}[p => Lit(bits[p]) for (p, _) in cl.lits])
+    return out === nothing ? cl : out
 end
 
 ## the bounded oracle
@@ -2022,8 +2074,8 @@ function reason_lines(sat::SAT{P,V}, satx::SAT{P,V}, facts::Vector{Fact{P}},
         Line{P}[Line{P}(it.clause, P[], false, n, nothing)
                 for it in factor_items(
                     Item{P}[Item{P}(c, P[], UInt64(0)) for c in core])] :
-        Line{P}[Line{P}(cl, trim_route(sat, core, cl, route),
-                        false, n, meet.pivot)
+        Line{P}[Line{P}(widen_support(sat, cl, meet.pivot),
+                        trim_route(sat, core, cl, route), false, n, meet.pivot)
                 for (cl, route) in meet.sides]
     append!(ls, drop_covered(derived))
     return ls
