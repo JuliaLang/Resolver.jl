@@ -145,14 +145,14 @@ function refresh_advice(julia::VersionNumber,
 
         Closing it takes three steps across two repositories:
 
-          1. regenerate the data -- dispatch the "Update Historical Stdlibs"
-             workflow at JuliaPackaging/HistoricalStdlibVersions.jl, which opens
-             a pull request with the new stanza;
+          1. find the new stanza -- the "Update Historical Stdlibs" workflow at
+             JuliaPackaging/HistoricalStdlibVersions.jl runs weekly and opens a
+             bot pull request with it (dispatch the workflow if there is none);
           2. merge that, bump its Project.toml, and register the release;
           3. then refresh the pin here.
 
-        Step 1 is the one to check first: that workflow runs only when somebody
-        triggers it, so the data can be weeks behind a Julia release."""
+        Step 2 is the usual hold-up: the bot pull request regenerates on
+        schedule but waits for somebody to merge and release it."""
 end
 
 # Guarded so the file can be included for its pieces -- bin/test/runtests.jl
