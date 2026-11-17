@@ -17,8 +17,28 @@ env:
   JULIA_PKG_SERVER_REGISTRY_PREFERENCE: eager
 
 jobs:
+  # A stale stdlib snapshot fails one assertion in the bin/ tests, which come
+  # late in every matrix job, so it used to cost the whole matrix -- some three
+  # runner-hours -- to report what this job reports in about a minute. The cause
+  # is outside the change under test (a Julia release the snapshot does not yet
+  # describe), so nothing the matrix would say is worth waiting for. Only stable
+  # Julia: bin/check_stdlibs.jl skips prereleases.
+  stdlib-snapshot:
+    name: stdlib snapshot describes Julia 1
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: julia-actions/setup-julia@v3
+        with:
+          version: '1'
+      - name: Instantiate bin/
+        run: julia --project=bin -e 'using Pkg; Pkg.instantiate()'
+      - name: Check the stdlib snapshot
+        run: julia --project=bin bin/check_stdlibs.jl
+
   test:
     name: Julia ${{ matrix.version }} - ${{ matrix.os }} - ${{ matrix.arch }} - ${{ github.event_name }}
+    needs: stdlib-snapshot
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
