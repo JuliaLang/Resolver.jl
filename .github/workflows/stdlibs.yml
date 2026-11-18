@@ -84,3 +84,41 @@ jobs:
         run: touch -d '@0' bin/julia_versions.json
       - name: Check for missing manifests
         run: julia --project=bin bin/update_manifests.jl --check
+
+  # A failed scheduled run notifies nobody: GitHub mails only whoever last
+  # edited the cron line, and the weekly check went red for five weeks running
+  # before a PR tripped over the same drift. An issue reaches the repo's
+  # watchers. One issue per outbreak: while it is open, later failures comment
+  # on it rather than opening another. Only the scheduled run reports, since a
+  # pull request's failures already show up on the pull request.
+  report:
+    name: Open an issue for a failed weekly check
+    needs: [snapshot, manifests]
+    if: failure() && github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      TITLE: The weekly stdlib check is failing
+      RUN: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+    steps:
+      - name: Open or update the issue
+        run: |
+          number=$(gh issue list --state open --search "in:title \"$TITLE\"" \
+                     --json number,title --jq ".[] | select(.title == \"$TITLE\") | .number" | head -n 1)
+          if [ -n "$number" ]; then
+            gh issue comment "$number" --body "Still failing: $RUN"
+          else
+            gh issue create --title "$TITLE" --body "$(printf '%s\n' \
+              "The scheduled \`stdlibs\` run failed: $RUN" \
+              "" \
+              "Each failed job's log says what to do. Usually it is one of:" \
+              "" \
+              "- **a stale pin** -- a newer HistoricalStdlibVersions is out: run \`julia bin/update_manifests.jl\` and commit the \`bin/Manifest-*.toml\` changes;" \
+              "- **a hole upstream** -- the pin is already the newest release: merge the bot pull request at JuliaPackaging/HistoricalStdlibVersions.jl, register a release, then refresh the pin here;" \
+              "- **a missing manifest** -- a new Julia minor is out: \`bin/update_manifests.jl\` creates its manifest." \
+              "" \
+              "Close this once the weekly run passes again.")"
+          fi
