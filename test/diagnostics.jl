@@ -945,6 +945,32 @@ end
     @test sol !== nothing && !haskey(sol, :W)
 end
 
+@testset "diagnosis: a line read towards the compat says the registry's bound" begin
+    # :A needs a new :L, which bounds :K to its oldest versions; :M tells :K's
+    # newer versions apart. Whichever of them the compat asks for, the line
+    # closing against it is the same registry bound, not the compat's complement
+    data = Dict(
+        :A => PkgData([:a1], Dict(:a1 => [:L]),
+                      Dict(:a1 => Dict(:L => [:l4, :l3]))),
+        :L => PkgData([:l4, :l3, :l2, :l1], DEPS_NONE,
+                      Dict(:l4 => Dict(:K => [:k2]),
+                           :l3 => Dict(:K => [:k2, :k1]),
+                           :l2 => Dict(:K => [:k3, :k2, :k1]))),
+        :K => PkgData([:k6, :k5, :k4, :k3, :k2, :k1], DEPS_NONE,
+                      Dict(:k6 => Dict(:M => [:m3]), :k5 => Dict(:M => [:m2]),
+                           :k4 => Dict(:M => [:m1]))),
+        :M => PkgData([:m3, :m2, :m1], DEPS_NONE, COMP_NONE),
+    )
+    for k in (:k6, :k5, :k4)
+        prob = Problem([:A, :K, :M]; compat = Dict(:K => [k]))
+        d = check_diagnosis(data, prob)
+        report = sprint(show, MIME("text/plain"), d)
+        @test occursin("A a1 requires L ≥l3", report)
+        @test occursin("L ≥l3 constrains K to ≤k2\n", report)
+        @test occursin("your compat restricts K to $k\n", report)
+    end
+end
+
 @testset "diagnosis: any kind is a constraint like any other" begin
     prob = Problem([:A];
         prerelease = (p, v) -> p === :B && v !== :w1,

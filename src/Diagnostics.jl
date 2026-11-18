@@ -913,6 +913,10 @@ end
 # this reason's core happened to need
 const TIGHTEN_CLASSES = 24
 
+# the same limit for `tighten_side`, which runs once per printed side rather
+# than once per candidate pivot
+const SIDE_CLASSES = 1024
+
 # how many of each enumeration is worth having. The reason walk is exponential
 # and the repair enumeration can be too; both truncate, and truncation is
 # disclosed rather than hidden (a conflict simply explains fewer of the reasons
@@ -1038,6 +1042,82 @@ function tighten!(sat::SAT{P,V}, bits::BitVector, pivot::P,
         end
     end
     return bits
+end
+
+# A fresh literal that, assumed, holds `p` outside `bits`. A class the literal
+# splits stays choosable, which only makes the question easier to satisfy.
+function deny_lit!(sat::SAT{P,V}, p::P, bits::BitVector) where {P,V}
+    z = sat_new_variable(sat)
+    sat_add_var(sat, -z)
+    info = sat.info[p]
+    for c = 1:nclasses(info)
+        all(j -> bits[j], info.members[c]) && continue
+        sat_add_var(sat, -forbidden_lit(sat, p, c))
+    end
+    bits[end] || sat_add_var(sat, -installed_lit(sat, p))
+    sat_add(sat)
+    return z
+end
+
+# A side is stated from its support, so its literal on a package the query
+# limits is the complement of what the query left — what was asked, not what
+# the registry says. Read towards that package the side then says "everything
+# but what you asked for", which moves with the query. So drop from the literal
+# each version the registry rules out with the rest of the side denied; only
+# versions go, and a literal is never emptied.
+#
+# The rest of the side is denied as the page will print it. Where the meet has
+# one other side, the chain says that side first and narrows the pivot to it,
+# so this side's antecedent reads as only the pivot versions both leave. A bound
+# taken over the whole antecedent would be true but looser than the line it is
+# printed in: one an older release imposes, under a range that excludes it. So
+# `narrow`, the other side's literal on the pivot, is ruled out of this side's
+# antecedent first. That widens the pivot literal, which keeps the line true,
+# and the meet still closes: the two pivot literals still share nothing.
+function tighten_side(sat::SAT{P,V}, cl::Clause{P}, pivot::P,
+                      narrow::Union{Nothing,BitVector}) where {P,V}
+    length(cl.lits) ≥ 2 || return cl
+    bits = Dict{P,BitVector}(p => copy(m.bits) for (p, m) in cl.lits)
+    narrow === nothing || !haskey(bits, pivot) ||
+        (bits[pivot] .|= .~narrow)
+    tightened = false
+    for (q, _) in cl.lits
+        q == pivot && continue
+        info = sat.info[q]
+        nclasses(info) ≤ SIDE_CLASSES || continue
+        b = bits[q]
+        any(@view b[1:end-1]) || continue
+        trial = copy(b)
+        with_temp_clauses(sat) do
+            rest = Int[deny_lit!(sat, p, bits[p]) for (p, _) in cl.lits if p != q]
+            for c = 1:nclasses(info)
+                mem = info.members[c]
+                any(j -> trial[j], mem) || continue
+                assuming(sat, Int[rest; -forbidden_lit(sat, q, c)]) && continue
+                for j in mem
+                    trial[j] = false
+                end
+            end
+        end
+        if any(trial) && trial != b
+            bits[q] = trial
+            tightened = true
+        end
+    end
+    # the pivot was widened only to tighten against; with nothing tightened,
+    # the side as derived is the better statement
+    tightened || return cl
+    out = clause(Pair{P,Lit}[p => Lit(bits[p]) for (p, _) in cl.lits])
+    return out === nothing ? cl : out
+end
+
+# what the page narrows a side's pivot to before saying it: the other side's
+# literal, where there is exactly one. A meet of three or more sides prints
+# whole, each side against the full pivot, so there is nothing to narrow to.
+function side_narrowing(meet, i::Int)
+    length(meet.sides) == 2 || return nothing
+    m = first(meet.sides[3 - i])[meet.pivot]
+    return m === nothing ? nothing : m.bits
 end
 
 ## the bounded oracle
@@ -2022,9 +2102,10 @@ function reason_lines(sat::SAT{P,V}, satx::SAT{P,V}, facts::Vector{Fact{P}},
         Line{P}[Line{P}(it.clause, P[], false, n, nothing)
                 for it in factor_items(
                     Item{P}[Item{P}(c, P[], UInt64(0)) for c in core])] :
-        Line{P}[Line{P}(cl, trim_route(sat, core, cl, route),
-                        false, n, meet.pivot)
-                for (cl, route) in meet.sides]
+        Line{P}[Line{P}(tighten_side(sat, cl, meet.pivot,
+                                     side_narrowing(meet, i)),
+                        trim_route(sat, core, cl, route), false, n, meet.pivot)
+                for (i, (cl, route)) in enumerate(meet.sides)]
     append!(ls, drop_covered(derived))
     return ls
 end
