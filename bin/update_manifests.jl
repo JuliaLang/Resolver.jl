@@ -45,7 +45,7 @@ manifest_path(minor::VersionNumber) = joinpath(BIN, "Manifest-v$(series(minor)).
 # what it will bundle, not what it does), matching the project's own bound.
 function supported_minors()
     project = Pkg.TOML.parsefile(joinpath(BIN, "Project.toml"))
-    # Project.toml compat is semver syntax ("^1.9"), not registry syntax
+    # Project.toml compat is semver syntax ("^1.10"), not registry syntax
     bound = Pkg.Types.semver_spec(get(get(project, "compat", Dict()), "julia", "*"))
     minors = Set{VersionNumber}()
     for v in Registries.JULIA_VERSIONS
@@ -110,7 +110,7 @@ function main(args::Vector{String} = ARGS)
             continue
         end
         # A Julia with no manifest of its own falls back to Manifest.toml, which
-        # is the 1.9 symlink -- so it would overwrite 1.9's pins with its own.
+        # is the 1.10 symlink -- so it would overwrite 1.10's pins with its own.
         # Giving it an empty manifest first makes it resolve into the right file.
         is_new = !isfile(path)
         is_new && touch(path)
@@ -132,14 +132,15 @@ function main(args::Vector{String} = ARGS)
     end
 
     println()
-    # The 1.9 manifest is reached through a symlink, since 1.9 does not
-    # understand version-specific manifest files. Pkg writing through it should
-    # leave the link alone, but a manifest silently turned into a regular file
-    # would strand 1.9 on stale pins, so say so rather than assume.
+    # Manifest.toml is a symlink to the 1.10 manifest, the fallback for any
+    # Julia that does not read version-specific manifest files or has none of
+    # its own (nightly, say). Pkg writing through it should leave the link
+    # alone, but a manifest silently turned into a regular file would strand
+    # that fallback on stale pins, so say so rather than assume.
     link = joinpath(BIN, "Manifest.toml")
     ispath(link) && !islink(link) &&
         println("WARNING: $link is no longer a symlink -- restore it with\n",
-                "    ln -sf Manifest-v1.9.toml $link")
+                "    ln -sf Manifest-v1.10.toml $link")
     isempty(created) || println("created: ", join(("Manifest-v$(series(m)).toml" for m in created), ", "))
     if isempty(changed)
         println("all manifests already current")
