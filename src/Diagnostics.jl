@@ -913,9 +913,9 @@ end
 # this reason's core happened to need
 const TIGHTEN_CLASSES = 24
 
-# the same limit for `widen_support`, which runs once per printed side rather
+# the same limit for `tighten_side`, which runs once per printed side rather
 # than once per candidate pivot
-const WIDEN_CLASSES = 1024
+const SIDE_CLASSES = 1024
 
 # how many of each enumeration is worth having. The reason walk is exponential
 # and the repair enumeration can be too; both truncate, and truncation is
@@ -1065,13 +1065,26 @@ end
 # but what you asked for", which moves with the query. So drop from the literal
 # each version the registry rules out with the rest of the side denied; only
 # versions go, and a literal is never emptied.
-function widen_support(sat::SAT{P,V}, cl::Clause{P}, pivot::P) where {P,V}
+#
+# The rest of the side is denied as the page will print it. Where the meet has
+# one other side, the chain says that side first and narrows the pivot to it,
+# so this side's antecedent reads as only the pivot versions both leave. A bound
+# taken over the whole antecedent would be true but looser than the line it is
+# printed in: one an older release imposes, under a range that excludes it. So
+# `narrow`, the other side's literal on the pivot, is ruled out of this side's
+# antecedent first. That widens the pivot literal, which keeps the line true,
+# and the meet still closes: the two pivot literals still share nothing.
+function tighten_side(sat::SAT{P,V}, cl::Clause{P}, pivot::P,
+                      narrow::Union{Nothing,BitVector}) where {P,V}
     length(cl.lits) ≥ 2 || return cl
     bits = Dict{P,BitVector}(p => copy(m.bits) for (p, m) in cl.lits)
+    narrow === nothing || !haskey(bits, pivot) ||
+        (bits[pivot] .|= .~narrow)
+    tightened = false
     for (q, _) in cl.lits
         q == pivot && continue
         info = sat.info[q]
-        nclasses(info) ≤ WIDEN_CLASSES || continue
+        nclasses(info) ≤ SIDE_CLASSES || continue
         b = bits[q]
         any(@view b[1:end-1]) || continue
         trial = copy(b)
@@ -1086,10 +1099,25 @@ function widen_support(sat::SAT{P,V}, cl::Clause{P}, pivot::P) where {P,V}
                 end
             end
         end
-        any(trial) && (bits[q] = trial)
+        if any(trial) && trial != b
+            bits[q] = trial
+            tightened = true
+        end
     end
+    # the pivot was widened only to tighten against; with nothing tightened,
+    # the side as derived is the better statement
+    tightened || return cl
     out = clause(Pair{P,Lit}[p => Lit(bits[p]) for (p, _) in cl.lits])
     return out === nothing ? cl : out
+end
+
+# what the page narrows a side's pivot to before saying it: the other side's
+# literal, where there is exactly one. A meet of three or more sides prints
+# whole, each side against the full pivot, so there is nothing to narrow to.
+function side_narrowing(meet, i::Int)
+    length(meet.sides) == 2 || return nothing
+    m = first(meet.sides[3 - i])[meet.pivot]
+    return m === nothing ? nothing : m.bits
 end
 
 ## the bounded oracle
@@ -2074,9 +2102,10 @@ function reason_lines(sat::SAT{P,V}, satx::SAT{P,V}, facts::Vector{Fact{P}},
         Line{P}[Line{P}(it.clause, P[], false, n, nothing)
                 for it in factor_items(
                     Item{P}[Item{P}(c, P[], UInt64(0)) for c in core])] :
-        Line{P}[Line{P}(widen_support(sat, cl, meet.pivot),
+        Line{P}[Line{P}(tighten_side(sat, cl, meet.pivot,
+                                     side_narrowing(meet, i)),
                         trim_route(sat, core, cl, route), false, n, meet.pivot)
-                for (cl, route) in meet.sides]
+                for (i, (cl, route)) in enumerate(meet.sides)]
     append!(ls, drop_covered(derived))
     return ls
 end

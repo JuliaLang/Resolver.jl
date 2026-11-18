@@ -966,7 +966,7 @@ end
         d = check_diagnosis(data, prob)
         report = sprint(show, MIME("text/plain"), d)
         @test occursin("A a1 requires L ≥l3", report)
-        @test occursin("L ≥l3 constrains K to ≤k3\n", report)
+        @test occursin("L ≥l3 constrains K to ≤k2\n", report)
         @test occursin("your compat restricts K to $k\n", report)
     end
 end
