@@ -803,7 +803,7 @@ function factor_items(items::Vector{Item{P}}, keep = ()) where {P}
             c, e = items[i].clause, items[j].clause
             length(c.lits) == length(e.lits) || continue
             diff = P[q for (q, m) in c.lits
-                     if (n = e[q]; n === nothing || n != m)]
+                     if (n = get(e, q, nothing); n === nothing || n != m)]
             length(diff) == 1 || continue
             # merge only across a package on its way out: resolving two of a
             # meet's own sides on the kept package would fold the meet itself
@@ -832,7 +832,7 @@ function eliminate_one(items::Vector{Item{P}}, q::P, budget::Ref{Int}) where {P}
     hit = Item{P}[]
     out = Item{P}[]
     for it in items
-        push!(it.clause[q] === nothing ? out : hit, it)
+        push!(haskey(it.clause, q) ? hit : out, it)
     end
     isempty(hit) && return out
     length(hit) > ELIM_ARITY && return nothing
@@ -1819,7 +1819,7 @@ function meet_at(
     routes = Dict{UInt64,Vector{P}}()
     for it in proj
         isbottom(it.clause) && return nothing
-        m = it.clause[pivot]
+        m = get(it.clause, pivot, nothing)
         m === nothing && continue
         if haskey(sigma, it.mask)
             sigma[it.mask] .&= m.bits
@@ -1880,7 +1880,7 @@ function meet_at(
         wide = count_ones(m) > 1
         wide && (cond += 1)
         wide && !iszero(m & menubits) && (cond_menu += 1)
-        lit = cl[pivot]
+        lit = get(cl, pivot, nothing)
         # a support the registry cannot satisfy at all leaves the pivot out of
         # the statement: what the side says is then about its own packages
         lit === nothing ||
@@ -2953,7 +2953,7 @@ end
 
 # is this given line the requirement itself, rather than a limit on it?
 is_requirement(l::Line{P}, p::P) where {P} =
-    (m = l.clause[p]; m !== nothing && !absent(m) &&
+    (m = get(l.clause, p, nothing); m !== nothing && !absent(m) &&
      all(m[i] for i = 1:nversions(m)))
 
 # is this line one the heading already states? The heading names the
@@ -3008,7 +3008,7 @@ end
 function meet_is_empty(group::Vector{Line{P}}, pivot) where {P}
     acc = nothing
     for l in group
-        m = l.clause[pivot]
+        m = get(l.clause, pivot, nothing)
         m === nothing && return false
         acc = acc === nothing ? copy(m.bits) : (acc .& m.bits)
     end
@@ -3232,7 +3232,7 @@ function print_chain(io::IO, c::Conflict{P,V}, given::Vector{Line{P}},
         end
         if s !== nothing
             for l in u
-                m = l.clause[s]
+                m = get(l.clause, s, nothing)
                 m === nothing && continue
                 acc[s] = haskey(acc, s) ? Lit(acc[s].bits .& m.bits) : m
             end
@@ -3801,7 +3801,7 @@ function conflict_problems(c::Conflict{P,V}, rest::Set{P} = Set{P}()) where {P,V
             acc = trues(length(c.versions[pivot]) + 1)
             closed = false
             for l in Line{P}[mine; given]
-                m = l.clause[pivot]
+                m = get(l.clause, pivot, nothing)
                 if m === nothing
                     # a side stated from a support the registry cannot satisfy
                     # names no bound at the pivot: it closes on its own
@@ -3845,7 +3845,7 @@ function conflict_problems(c::Conflict{P,V}, rest::Set{P} = Set{P}()) where {P,V
             end
         end
         for l in c.lines
-            m = l.clause[p]
+            m = get(l.clause, p, nothing)
             m === nothing && continue
             if nversions(m) != n
                 push!(bad, "a line reads $p over $(nversions(m)) versions " *

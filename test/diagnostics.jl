@@ -788,7 +788,7 @@ end
         return Diagnosis(Conflict{Symbol,Symbol}[c′], d.others)
     end
     for i in eachindex(c.lines)
-        c.lines[i].clause[:P] === nothing && continue
+        haskey(c.lines[i].clause, :P) || continue
         probs = report_problems(flipped(i))
         @test any(p -> occursin("does not read v1 as v2 leave it", p), probs)
     end
@@ -1948,7 +1948,7 @@ end
     report2 = sprint(show, MIME("text/plain"), d)
     @test occursin("requires PrettyTables ", report2)
     for cl in (l.clause for l in c2.lines)
-        m = cl["PrettyTables"]
+        m = get(cl, "PrettyTables", nothing)
         (m === nothing || length(cl.lits) < 2) && continue
         for (i, v) in enumerate(c2.versions["PrettyTables"])
             m[i] && @test v ∈ VersionSpec("2")
@@ -2006,7 +2006,7 @@ end
     said = Line{Symbol}[l for l in c.lines if !l.given]
     @test length(said) == 3
     for r in (:A, :B, :C)
-        @test any(l -> l.clause[r] !== nothing, said)
+        @test any(l -> haskey(l.clause, r), said)
     end
 end
 
