@@ -2651,7 +2651,7 @@ function upstream_fixes(deps::DepsProvider{P,D}, prob::Problem{P},
     # tried: the data is the same for every candidate but the one package each
     # of them edits
     cache = Dict{P,D}()
-    base(r::P) = get!(() -> deps.provider(r)::D, cache, r)
+    base(r::P) = get!(() -> deps[r], cache, r)
     firsts = Vector{Action{P}}[isempty(c.fixes) ? Action{P}[] :
                                first(c.fixes).actions for c in d.conflicts]
     ups = Vector{Upstream{P,V}}[Upstream{P,V}[] for _ in d.conflicts]
@@ -3744,11 +3744,6 @@ function report_problems(d::Diagnosis{P,V}; prob = nothing,
     return bad
 end
 
-# the package data for one package, from whichever shape of it the checker was
-# handed — the same two `resolve` itself takes
-pkg_data_of(data::DepsProvider{P,D}, p::P) where {P,D} = data.provider(p)::D
-pkg_data_of(data::AbstractDict{P,<:PkgData{P}}, p::P) where {P} = data[p]
-
 # (V7), of one conflict's upstream fixes
 function upstream_problems(c::Conflict{P,V}, prob, data) where {P,V}
     bad = String[]
@@ -3766,7 +3761,7 @@ function upstream_problems(c::Conflict{P,V}, prob, data) where {P,V}
         haskey(con, u.dep) ||
             push!(bad, "$said: no line of it says the query narrows $(u.dep)")
         data === nothing && continue
-        pd = pkg_data_of(data, u.pkg)
+        pd = data[u.pkg]
         u.latest == maximum(pd.versions) ||
             push!(bad, "$said: $(u.latest) is not the latest $(u.pkg)")
         if !haskey(pd.compat, u.latest) || !haskey(pd.compat[u.latest], u.dep)

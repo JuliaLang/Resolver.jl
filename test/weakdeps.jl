@@ -142,7 +142,7 @@ end
                 w in registry.EXCLUDES && continue
                 w in prov.packages || continue
                 # a version of e covered by this entry, and known to the provider
-                data = try pkg_data(prov, e.name) catch; return nothing end
+                data = try prov[e.name] catch; return nothing end
                 for v in data.versions
                     v in r || continue
                     haskey(data.compat, v) || continue
