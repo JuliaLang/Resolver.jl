@@ -112,8 +112,8 @@ ordering of *classes* it induces, which is
 [`class_ranking`](@ref Resolver.class_ranking)'s business.
 """
 version_permutations(
-    _info  :: AbstractDict{P, PkgInfo{P,V}},
-    _order :: Nothing,
+    info  :: AbstractDict{P, PkgInfo{P,V}},
+    order :: Nothing,
 ) where {P,V} = nothing
 
 function version_permutations(
