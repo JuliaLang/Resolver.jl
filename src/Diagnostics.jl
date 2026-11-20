@@ -29,7 +29,7 @@ using ..Resolver: Resolver, SAT, Problem, Universe, PicoSAT, Relation,
     nclasses, installed_lit, forbidden_lit, sat_assume_var, sat_solve,
     sat_new_variable, sat_add_var, sat_add, with_classes_relaxed,
     with_temp_clauses, exclusion_kinds, kind_base, kind_source, EmptyDict,
-    relax, resolve, DepsProvider, PkgData, is_excluded
+    relax, resolve, DepsProvider, PkgData, SetOrVec, is_excluded
 using ..Resolver.Clauses: Clauses, Clause, Lit, literal, clause, packages,
     isbottom, subsumes, absent, resolve_raw, resolve_on, clause_phrase,
     range_phrase, selected, nversions, version_order
@@ -197,13 +197,16 @@ struct Conflict{P,V}
     shadows  :: Dict{P,Vector{Tuple{Int,Vector{Int}}}}
 end
 
-Conflict{P,V}(reqs, lines, versions, excluded, fixes) where {P,V} =
-    Conflict{P,V}(reqs, lines, versions, excluded, fixes,
-                  Tuple{Vector{Vector{Action{P}}},Vector{Action{P}}}[])
-Conflict{P,V}(reqs, lines, versions, excluded, fixes, blocks) where {P,V} =
-    Conflict{P,V}(reqs, lines, versions, excluded, fixes, blocks,
-                  Upstream{P,V}[])
-Conflict{P,V}(reqs, lines, versions, excluded, fixes, blocks, upstream) where {P,V} =
+Conflict{P,V}(
+    reqs     :: Vector{P},
+    lines    :: Vector{Line{P}},
+    versions :: Dict{P,Vector{V}},
+    excluded :: Dict{P,Vector{Vector{Symbol}}},
+    fixes    :: Vector{Fix{P,V}},
+    blocks   :: Vector{Tuple{Vector{Vector{Action{P}}},Vector{Action{P}}}} =
+        Tuple{Vector{Vector{Action{P}}},Vector{Action{P}}}[],
+    upstream :: Vector{Upstream{P,V}} = Upstream{P,V}[],
+) where {P,V} =
     Conflict{P,V}(reqs, lines, versions, excluded, fixes, blocks, upstream,
                   Dict{P,Vector{Tuple{Int,Vector{Int}}}}())
 
@@ -296,9 +299,13 @@ end
 Diagnosis(conflicts::Vector{Conflict{P,V}},
           alternatives::Vector{Alternative{P,V}}, others::Symbol) where {P,V} =
     Diagnosis{P,V}(conflicts, alternatives, others, false)
-Diagnosis{P,V}(conflicts, alternatives, others, truncated) where {P,V} =
-    Diagnosis{P,V}(conflicts, alternatives, others, truncated, false)
-Diagnosis{P,V}(conflicts, alternatives, others, truncated, upstream_cut) where {P,V} =
+Diagnosis{P,V}(
+    conflicts    :: Vector{Conflict{P,V}},
+    alternatives :: Vector{Alternative{P,V}},
+    others       :: Symbol,
+    truncated    :: Bool,
+    upstream_cut :: Bool = false,
+) where {P,V} =
     Diagnosis{P,V}(conflicts, alternatives, others, truncated, upstream_cut,
                    Dict{P,Vector{String}}())
 Diagnosis(conflicts::Vector{Conflict{P,V}}, others::Symbol) where {P,V} =
@@ -363,7 +370,7 @@ The versions of `p` a clause's literal indexes — the ones the universe this
 query was run against still holds. A literal has one more slot than this, for
 ⊥.
 """
-clause_versions(sat::SAT{P,V}, p) where {P,V} =
+clause_versions(sat::SAT{P,V}, p::P) where {P,V} =
     haskey(sat.info, p) ? sat.info[p].versions : V[]
 
 ## the universe the page prints over
@@ -585,7 +592,7 @@ Can these clauses hold together, over the versions the universe leaves each
 package they name? Asked of the clauses alone — no registry, no query — because
 whether a set of statements contradicts is a question about the statements.
 """
-function clauses_satisfiable(sat::SAT{P,V}, cs) where {P,V}
+function clauses_satisfiable(sat::SAT{P,V}, cs::Vector{Clause{P}}) where {P,V}
     ps = P[]
     for c in cs, p in packages(c)
         p in ps || push!(ps, p)
@@ -794,7 +801,8 @@ end
 # dozen lines with the same right-hand side; merged first, the split is over
 # what actually differs. A merged support is the union of the parents' — wider
 # than either may have needed, which the mask is allowed to be.
-function factor_items(items::Vector{Item{P}}, keep = ()) where {P}
+function factor_items(items::Vector{Item{P}},
+                      keep::Union{Tuple{}, Set{P}} = ()) where {P}
     items = copy(items)
     while true
         done = true
@@ -856,7 +864,7 @@ end
 # eliminate everything outside `keep`, cheapest package first — any order
 # preserves satisfiability, and taking the least-mentioned one keeps the
 # intermediate sets small
-function eliminate_to(items::Vector{Item{P}}, keep) where {P}
+function eliminate_to(items::Vector{Item{P}}, keep::Set{P}) where {P}
     work = factor_items(items, keep)
     while true
         counts = Dict{P,Int}()
@@ -885,7 +893,7 @@ out contradicts exactly when what went in did.
 caller then has the clauses it started with, which are true whether or not they
 have been shaped.
 """
-function project(lines::Vector{Line{P}}, keep) where {P}
+function project(lines::Vector{Line{P}}, keep::Set{P}) where {P}
     out = eliminate_to(
         Item{P}[Item{P}(l.clause, copy(l.through), UInt64(0)) for l in lines], keep)
     out === nothing && return nothing
@@ -963,7 +971,7 @@ function VarMap(sat::SAT{P,V}) where {P,V}
     return VarMap{P}(Set{P}(keys(sat.info)), pkgs, lits)
 end
 
-Base.haskey(vm::VarMap{P}, p) where {P} = p in vm.known
+Base.haskey(vm::VarMap{P}, p::Any) where {P} = p in vm.known
 
 """
     with_emptied_packages(body, sat, vm) -> body(pkg_lits, pkg_of)
@@ -1012,7 +1020,7 @@ struct Fact{P}
 end
 
 # solve with exactly `lits` assumed
-function assuming(sat::SAT, lits)
+function assuming(sat::SAT, lits::Vector{Int})
     for l in lits
         sat_assume_var(sat, l)
     end
@@ -1109,15 +1117,6 @@ function tighten_side(sat::SAT{P,V}, cl::Clause{P}, pivot::P,
     tightened || return cl
     out = clause(Pair{P,Lit}[p => Lit(bits[p]) for (p, _) in cl.lits])
     return out === nothing ? cl : out
-end
-
-# what the page narrows a side's pivot to before saying it: the other side's
-# literal, where there is exactly one. A meet of three or more sides prints
-# whole, each side against the full pivot, so there is nothing to narrow to.
-function side_narrowing(meet, i::Int)
-    length(meet.sides) == 2 || return nothing
-    m = get(first(meet.sides[3 - i]), meet.pivot, nothing)
-    return m === nothing ? nothing : m.bits
 end
 
 ## the bounded oracle
@@ -1485,14 +1484,16 @@ end
 const Menu = Vector{Vector{Int}}
 # a layer: the menus whose product it is, a generalized rectangle
 const Layer = Vector{Menu}
+# the same layer as the search below builds it, each option a mask of facts
+const MaskLayer = Vector{Vector{UInt64}}
 
 # The members a layer's selections reach, and what it costs to read, priced
 # the way it prints: the menus of one entry are said together as one line, a
 # phrase per action; a menu with a choice is a line and then a line per entry,
 # each a phrase per action — so a compound entry is paid for by the actions it
 # names, which is what keeps a cover from collapsing into the flat list.
-lreach(w) = prod(length, w; init = 1)
-function lcost(w)
+lreach(w::Union{Layer,MaskLayer}) = prod(length, w; init = 1)
+function lcost(w::Union{Layer,MaskLayer})
     choice = 0; single = 0
     for m in w
         length(m) == 1 ? (single += olen(m[1])) :
@@ -1507,7 +1508,7 @@ olen(o::UInt64) = count_ones(o)
 # a cover is for — then more menus, since a finer split says more about the
 # family than a coarser one, and then the facts themselves, so that a tie never
 # turns on the order the search happened to run in.
-function richer(a, b)
+function richer(a::L, b::L) where {L<:Union{Layer,MaskLayer}}
     ka, kb = lreach(a) * lcost(b), lreach(b) * lcost(a)
     ka != kb && return ka > kb
     length(a) != length(b) && return length(a) > length(b)
@@ -1525,7 +1526,7 @@ end
 
 # what the menus other than `skip` offer: their selections, and the facts they
 # hold between them
-function menu_context(menus::Vector{Vector{UInt64}}, skip)
+function menu_context(menus::Vector{Vector{UInt64}}, skip::Tuple{Vararg{Int}})
     rest = Vector{UInt64}[menus[l] for l in eachindex(menus) if l ∉ skip]
     omask = UInt64(0)
     for m in rest, o in m
@@ -1781,6 +1782,15 @@ struct Meet{P}
     pivot :: P
     sides :: Vector{Tuple{Clause{P},Vector{P}}}
     key   :: Tuple{Bool,Int,Int,Int,Int,Int,String}
+end
+
+# what the page narrows a side's pivot to before saying it: the other side's
+# literal, where there is exactly one. A meet of three or more sides prints
+# whole, each side against the full pivot, so there is nothing to narrow to.
+function side_narrowing(meet::Meet{P}, i::Int) where {P}
+    length(meet.sides) == 2 || return nothing
+    m = get(first(meet.sides[3 - i]), meet.pivot, nothing)
+    return m === nothing ? nothing : m.bits
 end
 
 # The strongest bound on `pivot` each support entails, and the smallest
@@ -2293,7 +2303,8 @@ end
 # the best key of a lift extending `S` by a choice for each class from `i` on,
 # or `best` where none beats it
 function lift_search(choices::Vector{Vector{Vector{Symbol}}},
-                     excl::Vector{Vector{Symbol}}, i::Int, S::Vector{Symbol}, best)
+                     excl::Vector{Vector{Symbol}}, i::Int, S::Vector{Symbol},
+                     best::Union{Nothing, Tuple{Int,Int,Vector{Symbol}}})
     best !== nothing && length(S) > best[1] && return best
     if i > length(choices)
         j = findfirst(e -> !isempty(e) && e ⊆ S, excl)
@@ -2317,7 +2328,8 @@ fix_actions(prob::Problem{P}, sat::SAT{P,V}, univ::Universe{P,V},
 # would *get* is the resolver's optimising answer, and nothing else may stand
 # in for it.
 function witness(sat::SAT{P,V}, univ::Universe{P,V}, prob::Problem{P},
-                 actions::Vector{Action{P}}; by, order) where {P,V}
+                 actions::Vector{Action{P}}; by::Function,
+                 order::Union{Nothing,Function}) where {P,V}
     drop_reqs, drop_constraints = withdrawal(actions)
     sol = resolve(sat, relax(univ, prob, drop_reqs, drop_constraints; order); by)
     return sol === nothing ? Dict{P,V}() : sol
@@ -2353,7 +2365,7 @@ function diagnose(
     prob :: Problem{P},
     univ :: Universe{P,V};
     by   :: Function = identity,
-    order = nothing,
+    order :: Union{Nothing,Function} = nothing,
 ) where {P,V}
     vm = VarMap(sat)
     seen = P[]
@@ -2544,7 +2556,8 @@ const UPSTREAM_SOLVES = 8
 # leaves — one it admits is not what stops the user — and the query must admit
 # `p`'s latest, since otherwise a release that helps exists already and the menu
 # says so. The third is a solve.
-function upstream_candidates(base, prob::Problem{P}, c::Conflict{P,V}) where {P,V}
+function upstream_candidates(base::Function, prob::Problem{P},
+                             c::Conflict{P,V}) where {P,V}
     out = Tuple{P,V,P,Vector{V}}[]
     isempty(c.lines) && return out
     _, con, _, _ = given_facts(c, Line{P}[l for l in c.lines if l.given])
@@ -2608,9 +2621,10 @@ end
 # page uses — resolved against the registry that release would make. `nothing`
 # where it does not answer with `p` at its latest and `q` installed, which is
 # what the sentence would have claimed.
-function upstream_probe(deps::DepsProvider{P,D}, base, prob::Problem{P},
+function upstream_probe(deps::DepsProvider{P,D}, base::Function, prob::Problem{P},
                         p::P, v::V, q::P, supported::Vector{V},
-                        settle::Vector{Action{P}}; by, order) where {P,D,V}
+                        settle::Vector{Action{P}}; by::Function,
+                        order::Union{Nothing,Function}) where {P,D,V}
     over = without_bound(base(p), v, q)
     release(r::P) = r == p ? over : base(r)
     # the release's own data is a `PkgData` of its own type — same versions,
@@ -2645,7 +2659,7 @@ on the answer and is not otherwise announced.
 """
 function upstream_fixes(deps::DepsProvider{P,D}, prob::Problem{P},
                         d::Diagnosis{P,V}; by::Function = identity,
-                        order = nothing) where {P,D,V}
+                        order::Union{Nothing,Function} = nothing) where {P,D,V}
     isempty(d.conflicts) && return d
     # one call per package for the whole report, however many releases are
     # tried: the data is the same for every candidate but the one package each
@@ -2688,7 +2702,7 @@ end
 
 upstream_fixes(data::AbstractDict{P,<:PkgData{P}}, prob::Problem{P},
                d::Diagnosis{P,V}; by::Function = identity,
-               order = nothing) where {P,V} =
+               order::Union{Nothing,Function} = nothing) where {P,V} =
     upstream_fixes(DepsProvider(p -> data[p], keys(data)), prob, d; by, order)
 
 ## the report
@@ -2756,7 +2770,7 @@ action_phrase(a::Action) = action_phrase(kind_base(a.kind), a.pkg, kind_sources(
 
 # the three forms of one action, each over a kind, the package, and the places
 # it was declared: to do, being tried, and done
-function action_phrase(kind::Symbol, pkg, srcs)
+function action_phrase(kind::Symbol, pkg::Any, srcs::Vector{String})
     kind === :drop && return "drop dependency $pkg$(paren(srcs))"
     kind === :compat && return "relax your compat on $pkg$(paren(srcs))"
     kind === :pin && return "unpin $pkg$(paren(srcs))"
@@ -2765,7 +2779,7 @@ end
 
 # the same action, said as the thing tried rather than the thing to do: a
 # blocked entry reports on a road not taken
-function action_gerund(kind::Symbol, pkg, srcs)
+function action_gerund(kind::Symbol, pkg::Any, srcs::Vector{String})
     kind === :drop && return "dropping dependency $pkg$(paren(srcs))"
     kind === :compat && return "relaxing your compat on $pkg$(paren(srcs))"
     kind === :pin && return "unpinning $pkg$(paren(srcs))"
@@ -2774,7 +2788,7 @@ end
 
 # ... and as the thing that would have had to happen as well: the completion
 # an "unless you also" names
-function action_past(kind::Symbol, pkg, srcs)
+function action_past(kind::Symbol, pkg::Any, srcs::Vector{String})
     kind === :drop && return "dropped dependency $pkg$(paren(srcs))"
     kind === :compat && return "relaxed your compat on $pkg$(paren(srcs))"
     kind === :pin && return "unpinned $pkg$(paren(srcs))"
@@ -2784,7 +2798,7 @@ end
 # Where something was declared, said in parentheses after it, as the query
 # gave it: a caller that passes `path:line` gets what an editor opens, and a
 # query that said nothing gets nothing.
-paren(srcs) = isempty(srcs) ? "" : " (" * join(srcs, ", ") * ")"
+paren(srcs::Vector{String}) = isempty(srcs) ? "" : " (" * join(srcs, ", ") * ")"
 
 # the places a kind carries: the one inside a sourced kind, or none
 kind_sources(kind::Symbol) =
@@ -2823,10 +2837,11 @@ end
 
 no_sources(::Type{P}) where {P} = EmptyDict{P,Vector{String}}()
 
-join_and(xs) = join(xs, ", ", " and ")
-join_or(xs) = join(xs, ", ", " or ")
+join_and(xs::AbstractVector) = join(xs, ", ", " and ")
+join_or(xs::AbstractVector) = join(xs, ", ", " or ")
 
-fix_phrase(f::Fix{P,V}, sources = no_sources(P)) where {P,V} =
+fix_phrase(f::Fix{P,V},
+           sources::AbstractDict{P,Vector{String}} = no_sources(P)) where {P,V} =
     join_and(actions_phrase(action_phrase, f.actions, sources))
 
 # The requirements a conflict's heading names: the ones it answers for, which
@@ -2841,8 +2856,11 @@ heading_reqs(c::Conflict) = c.reqs
 # sentence that survives is the absolute truth: a requirement whose package the
 # universe holds nothing of has no argument to make, and what became of it is
 # the whole of what there is to say.
-function conflict_heading(c::Conflict{P,V}, also = nothing,
-                          sources = no_sources(P)) where {P,V}
+function conflict_heading(
+    c       :: Conflict{P,V},
+    also    :: Union{Nothing,P} = nothing,
+    sources :: AbstractDict{P,Vector{String}} = no_sources(P),
+) where {P,V}
     rs = heading_reqs(c)
     # a requirement is named with where the query says it is required from:
     # the reader of a workspace's report goes to that file
@@ -2985,7 +3003,8 @@ end
 # chain has ruled out at that package weakens the clause, so the line stays
 # true; what it prints is then the bound the reader is holding rather than the
 # whole of what the statement would say standing on its own.
-function line_phrase(l::Line{P}, vers, names; subject = nothing,
+function line_phrase(l::Line{P}, vers::Function, names::Function;
+                     subject::Union{Nothing,P} = nothing,
                      acc::Dict{P,Lit} = Dict{P,Lit}()) where {P}
     cl = l.clause
     if subject !== nothing && !isempty(acc)
@@ -3005,7 +3024,7 @@ end
 # do these lines leave the package they meet at nothing to be? Only then may
 # the page say so: two lines that agree about a package leave it something, and
 # claiming otherwise would claim more than the page shows.
-function meet_is_empty(group::Vector{Line{P}}, pivot) where {P}
+function meet_is_empty(group::Vector{Line{P}}, pivot::Union{Nothing,P}) where {P}
     acc = nothing
     for l in group
         m = get(l.clause, pivot, nothing)
@@ -3147,7 +3166,8 @@ function chain_root(c::Conflict{P,V}, order::Vector{P}, con::Dict{P,Line{P}},
     return nothing
 end
 
-function print_meet(io::IO, u::Vector{Line{P}}, vers, names) where {P}
+function print_meet(io::IO, u::Vector{Line{P}}, vers::Function,
+                    names::Function) where {P}
     if meet_is_empty(u, u[1].pivot)
         println(io, "  • incompatible constraints on ", names(u[1].pivot), ":")
         for g in u
@@ -3178,7 +3198,8 @@ end
 # Answers with the packages it stated the query's own facts about, in the order
 # it stated them: the last of them is the fact the chain closed against.
 function print_chain(io::IO, c::Conflict{P,V}, given::Vector{Line{P}},
-                     derived::Vector{Line{P}}, vers, names) where {P,V}
+                     derived::Vector{Line{P}}, vers::Function,
+                     names::Function) where {P,V}
     order, con, extra, loose = given_facts(c, given)
     units = derived_units(derived)
     sources = chain_sources(units)
@@ -3254,7 +3275,7 @@ end
 # witness land where the opened meet says it can, which is what the versions are
 # on the page for. Where the entry is one of several under a bullet, the line
 # says which entry it is for; where the bullet has only the one, it does not.
-function print_allows(io::IO, pkgs, sol::Dict{P,V}, indent::String;
+function print_allows(io::IO, pkgs::SetOrVec{P}, sol::Dict{P,V}, indent::String;
                       prefix::String = "allows: ") where {P,V}
     ps = sort!(P[p for p in pkgs if haskey(sol, p)])
     isempty(ps) && return
@@ -3262,7 +3283,7 @@ function print_allows(io::IO, pkgs, sol::Dict{P,V}, indent::String;
                   indent * "→ ", indent * "  ")
 end
 
-print_allows(io::IO, pkgs, f::Fix{P,V}, indent::String;
+print_allows(io::IO, pkgs::SetOrVec{P}, f::Fix{P,V}, indent::String;
              prefix::String = "allows: ") where {P,V} =
     print_allows(io, pkgs, f.solution, indent; prefix)
 
@@ -3271,7 +3292,7 @@ print_allows(io::IO, pkgs, f::Fix{P,V}, indent::String;
 # vector; derived from the one decided question — whether anything larger
 # exists — since the conflicts do reach every repair as cheap as theirs.
 function print_menu(io::IO, c::Conflict{P,V}, others::Symbol, alone::Bool,
-                    sources = no_sources(P)) where {P,V}
+                    sources::AbstractDict{P,Vector{String}} = no_sources(P)) where {P,V}
     isempty(c.fixes) && return
     if length(c.fixes) == 1
         # "only" is a claim about the world, and it is made only where the
@@ -3295,7 +3316,8 @@ end
 # actions at once — so where any of them does, the entries are parted by
 # semicolons, which the "and" inside an entry cannot be mistaken for. Where
 # every entry is a single action, commas read better and cannot mislead.
-function menu_phrase(menu::Vector{Fix{P,V}}, sources = no_sources(P)) where {P,V}
+function menu_phrase(menu::Vector{Fix{P,V}},
+                     sources::AbstractDict{P,Vector{String}} = no_sources(P)) where {P,V}
     ps = String[fix_phrase(f, sources) for f in menu]
     any(f -> length(f.actions) > 1, menu) ?
         join(ps, "; ", "; or ") : join(ps, ", ", ", or ")
@@ -3306,8 +3328,9 @@ end
 # the first way they offer. A menu of one entry has nothing to distinguish, so
 # its witness is said plainly; where there is a choice, each witness names the
 # entry it is for.
-function print_layer(io::IO, pkgs, layer::Vector{Vector{Fix{P,V}}},
-                     indent::String, sources = no_sources(P)) where {P,V}
+function print_layer(io::IO, pkgs::SetOrVec{P}, layer::Vector{Vector{Fix{P,V}}},
+                     indent::String,
+                     sources::AbstractDict{P,Vector{String}} = no_sources(P)) where {P,V}
     for menu in layer
         print_wrapped(io, menu_phrase(menu, sources), indent * "• ", indent * "  ")
         for f in menu
@@ -3389,9 +3412,10 @@ beside the requirements, which a page whose heading would otherwise repeat
 another's is given (`heading_extras`). `sources` is the diagnosis's: where the
 query said its requirements are required from.
 """
-function print_conflict(io::IO, c::Conflict{P,V}, index = nothing;
+function print_conflict(io::IO, c::Conflict{P,V}, index::Union{Nothing,Int} = nothing;
                         others::Symbol = :some, alone::Bool = true,
-                        also = nothing, sources = no_sources(P)) where {P,V}
+                        also::Union{Nothing,P} = nothing,
+                        sources::AbstractDict{P,Vector{String}} = no_sources(P)) where {P,V}
     index === nothing ||
         println(io, "Conflict ", index, ": ", conflict_heading(c, also, sources))
     vers(p) = c.versions[p]
@@ -3435,7 +3459,7 @@ end
 const UNLESS_NAMED = 4
 
 function print_blocked(io::IO, c::Conflict{P,V},
-                       sources = no_sources(P)) where {P,V}
+                       sources::AbstractDict{P,Vector{String}} = no_sources(P)) where {P,V}
     isempty(c.blocks) && return
     # one verdict is a remark and reads as one; several want the list they are
     single = length(c.blocks) == 1
@@ -3661,8 +3685,11 @@ lines are `S₁ ∪ S₂` and `S₂` alone contradicts, the union stays contradi
 whatever is deleted from `S₁`, so a union-level check would pass a page that
 silently destroyed the whole account of `S₁`.
 """
-function report_problems(d::Diagnosis{P,V}; prob = nothing,
-                         data = nothing) where {P,V}
+function report_problems(
+    d    :: Diagnosis{P,V};
+    prob :: Union{Nothing,Problem{P}} = nothing,
+    data :: Union{Nothing, DepsProvider{P}, AbstractDict{P,<:PkgData{P}}} = nothing,
+) where {P,V}
     bad = String[]
     # V5 is stated against the *full* withdrawal, never the single entry: an
     # owned reason can hold other conflicts' facts, and the witness respects
@@ -3747,7 +3774,11 @@ function report_problems(d::Diagnosis{P,V}; prob = nothing,
 end
 
 # (V7), of one conflict's upstream fixes
-function upstream_problems(c::Conflict{P,V}, prob, data) where {P,V}
+function upstream_problems(
+    c    :: Conflict{P,V},
+    prob :: Union{Nothing,Problem{P}},
+    data :: Union{Nothing, DepsProvider{P}, AbstractDict{P,<:PkgData{P}}},
+) where {P,V}
     bad = String[]
     isempty(c.upstream) && return bad
     _, con, _, _ = given_facts(c, Line{P}[l for l in c.lines if l.given])
