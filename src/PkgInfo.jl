@@ -372,7 +372,7 @@ function pkg_data(
     work = Set(reqs)
     while !isempty(work)
         p = pop!(work)
-        data_p = data[p] = pkg_data(deps, p)
+        data_p = data[p] = deps[p]
         for (v, deps_pv) in data_p.depends, q in deps_pv
             q in keys(data) && continue
             push!(work, q)

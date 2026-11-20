@@ -61,5 +61,7 @@ function DepsProvider(
     DepsProvider{P,D}(packages, provider)
 end
 
-pkg_data(deps::DepsProvider{P,D}, pkg::P) where {P,D<:PkgData} =
+# the data for one package, asked of the provider: `deps[p]` reads a provider
+# the way `data[p]` reads a dictionary of package data
+Base.getindex(deps::DepsProvider{P,D}, pkg::P) where {P,D<:PkgData} =
     deps.provider(pkg)::D
