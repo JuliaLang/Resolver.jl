@@ -118,7 +118,7 @@ version_permutations(
 
 function version_permutations(
     info  :: AbstractDict{P, PkgInfo{P,V}},
-    order,
+    order :: Function,
 ) where {P,V}
     perms = Dict{P, Vector{Int}}()
     for (p, info_p) in info
@@ -307,7 +307,8 @@ prepare_pkg_info(
     info  :: AbstractDict{P, PkgInfo{P,V}},
     prob  :: Problem{P},
     info′ :: Dict{P, PkgInfo{P,V}} = Dict{P, PkgInfo{P,V}}();
-    order = nothing, # nothing = canonical, else package -> `lt` comparator
+    # nothing = canonical, else package -> `lt` comparator
+    order :: Union{Nothing,Function} = nothing,
 ) where {P,V} =
     filter_pkg_info!(rank_pkg_info(info, prob, info′; order), prob)
 
@@ -319,7 +320,7 @@ function rank_pkg_info(
     info  :: AbstractDict{P, PkgInfo{P,V}},
     prob  :: Problem{P} = Problem(P[]),
     info′ :: Dict{P, PkgInfo{P,V}} = Dict{P, PkgInfo{P,V}}();
-    order = nothing,
+    order :: Union{Nothing,Function} = nothing,
 ) where {P,V}
     perms = version_permutations(info, order)
     reps, cperms, keys = class_ranking_keys(
@@ -559,7 +560,7 @@ function find_reachable(
     deact :: AbstractDict{P, BitVector},
     kq    :: Dict{P, Vector{Int}},
     k0    :: Dict{P, Vector{Int}},
-    tb    = reach_tables(info),
+    tb    :: NamedTuple = reach_tables(info),
 ) where {P,V}
     pkgs, N, ix, infos, ncls, deps, partners =
         tb.pkgs, tb.N, tb.ix, tb.infos, tb.ncls, tb.deps, tb.partners
@@ -603,7 +604,17 @@ end
 
 # Deactivation dictionaries only affect the prepared rank arrays. Share the
 # reachability loop across their concrete representations.
-@noinline function find_reachable_kernel!(reqs, tb, coff, soff, cw, chunks, KQ, K0, ord0)
+@noinline function find_reachable_kernel!(
+    reqs   :: SetOrVec,
+    tb     :: NamedTuple,
+    coff   :: Vector{Int},
+    soff   :: Vector{Int},
+    cw     :: Vector{Int},
+    chunks :: Vector{Vector{UInt64}},
+    KQ     :: Vector{Int},
+    K0     :: Vector{Int},
+    ord0   :: Vector{Union{Nothing,Vector{Int}}},
+)
     N, ix, infos, ncls, deps, partners =
         tb.N, tb.ix, tb.infos, tb.ncls, tb.deps, tb.partners
 
@@ -1274,7 +1285,8 @@ function drop_unmarked!(
 end
 
 # These passes do not depend on the optional representative/rank bookkeeping.
-@noinline function drop_unmarked_masks(info::Dict{P, <:PkgInfo{P}}, A) where {P}
+@noinline function drop_unmarked_masks(info::Dict{P, <:PkgInfo{P}},
+                                       A::Vector{UInt64}) where {P}
     masks = Dict{P, Tuple{BitVector, BitVector}}()
     for (p, info_p) in info
         X = info_p.conflicts
@@ -1303,7 +1315,13 @@ end
     return masks
 end
 
-@noinline function drop_unmarked_pkg(info_p::PkgInfo{P}, I, K, N, A) where {P}
+@noinline function drop_unmarked_pkg(
+    info_p :: PkgInfo{P},
+    I      :: BitVector,
+    K      :: BitVector,
+    N      :: Dict{P,Int},
+    A      :: Vector{UInt64},
+) where {P}
     # abbreviate components
     V = info_p.versions
     C = info_p.classes
