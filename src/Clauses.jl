@@ -95,11 +95,26 @@ an installation that gives some package a value its literal admits. Equal
 statements are `==`, which the ordering and the dropping of empty literals is
 what buys.
 
+A clause is a dictionary from packages to literals: `c[p]` is its literal on
+`p`, a `KeyError` where it says nothing about `p`, and iterating gives the
+entries in package order.
+
 Build one with [`clause`](@ref Resolver.Clauses.clause), which normalizes; the
 constructor takes the normal form as given.
 """
-struct Clause{P}
+struct Clause{P} <: AbstractDict{P,Lit}
     lits :: Vector{Pair{P,Lit}}
+end
+
+Base.length(c::Clause) = length(c.lits)
+Base.iterate(c::Clause, i::Int = 1) =
+    i > length(c.lits) ? nothing : (c.lits[i], i + 1)
+
+function Base.get(c::Clause, p, default)
+    for (q, m) in c.lits
+        q == p && return m
+    end
+    return default
 end
 
 Base.:(==)(a::Clause, b::Clause) = a.lits == b.lits
@@ -107,14 +122,6 @@ Base.hash(c::Clause, h::UInt) = hash(c.lits, hash(:Clause, h))
 
 # the packages the clause speaks about, in order
 packages(c::Clause{P}) where {P} = P[first(x) for x in c.lits]
-
-# the clause's literal on `p`, or `nothing` where it says nothing about `p`
-function Base.getindex(c::Clause{P}, p) where {P}
-    for (q, m) in c.lits
-        q == p && return m
-    end
-    return nothing
-end
 
 """
     isbottom(c) :: Bool
@@ -158,7 +165,7 @@ did not.
 """
 function subsumes(c::Clause{P}, d::Clause{P}) where {P}
     for (p, m) in c.lits
-        n = d[p]
+        n = get(d, p, nothing)
         n === nothing && return false
         any(m.bits .& .~n.bits) && return false
     end
@@ -182,7 +189,7 @@ function resolve_raw(clauses, q)
     order = P[]
     qbits = nothing
     for c in clauses
-        m = c[q]
+        m = get(c, q, nothing)
         b = m === nothing ? nothing : copy(m.bits)
         if qbits === nothing
             qbits = b
@@ -219,7 +226,7 @@ weakened, and a weakening is not a derivation — or when what comes out is a
 tautology.
 """
 function resolve_on(c::Clause{P}, d::Clause{P}, q::P) where {P}
-    a, b = c[q], d[q]
+    a, b = get(c, q, nothing), get(d, q, nothing)
     (a === nothing || b === nothing) && return nothing
     inter = Lit(a.bits .& b.bits)
     (inter == a || inter == b) && return nothing
@@ -239,9 +246,11 @@ function resolve_all(clauses, q)
     isempty(clauses) && return nothing
     r = resolve_raw(clauses, q)
     r === nothing && return nothing
-    m = r[q]
+    # an emptied literal is dropped, and then no parent can equal it
+    m = get(r, q, nothing)
+    m === nothing && return r
     for c in clauses
-        a = c[q]
+        a = get(c, q, nothing)
         a !== nothing && m == a && return nothing
     end
     return r
@@ -421,7 +430,7 @@ function clause_phrase(c::Clause{P}, vers, names = letters;
             return "$(names(p)) must be installed at $r"
         end
     end
-    s = subject === nothing || c[subject] === nothing ?
+    s = subject === nothing || !haskey(c, subject) ?
         default_subject(c, vers) : subject
     ants = String[antecedent_phrase(q, c[q], vers, names) for q in ps if q != s]
     m = c[s]

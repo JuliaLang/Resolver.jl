@@ -50,6 +50,28 @@ end
                      clause([1 => L(3, [2,3]), 2 => L(2, [2])]), 1) === nothing
 end
 
+@testset "clauses: a family at once" begin
+    # every two of these overlap on A, but the three together leave it nothing
+    fam = [clause([1 => L(3, [1,2])]), clause([1 => L(3, [2,3])]),
+           clause([1 => L(3, [1,3])])]
+    @test isbottom(Clauses.resolve_all(fam, 1))
+    # a resolvent that keeps one parent's literal is that parent, weakened
+    @test Clauses.resolve_all([clause([1 => L(3, [1]), 2 => L(2, [1])]),
+                               clause([1 => L(3, [1,2])])], 1) === nothing
+    @test Clauses.resolve_all(Clause{Int}[], 1) === nothing
+end
+
+@testset "clauses: a dictionary from packages to literals" begin
+    c = clause([2 => L(2, [1]), 1 => L(3, [1,2])])
+    @test length(c) == 2
+    @test collect(c) == [1 => L(3, [1,2]), 2 => L(2, [1])]
+    @test collect(keys(c)) == [1, 2]
+    @test c[2] == L(2, [1])
+    @test haskey(c, 1) && !haskey(c, 3)
+    @test get(c, 3, nothing) === nothing
+    @test_throws KeyError c[3]
+end
+
 @testset "clauses: direction is not part of the statement" begin
     # `A@10 requires B@5` and its contrapositive are one object, so a rule
     # written for either reaches both
