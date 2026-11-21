@@ -3706,11 +3706,13 @@ function report_problems(d::Diagnosis{P,V}; prob = nothing,
         for i in eachindex(sels), j in eachindex(sels)
             i == j && continue
             if sels[i] == sels[j]
-                i < j && push!(bad, "$tag: offers " *
-                    join_and(actions_phrase(action_phrase, sort!(
-                        collect(sels[i])::Vector{<:Action}; by = a -> (string(a.pkg), a.kind)),
-                        d.sources)) *
-                    " twice")
+                if i < j
+                    acts = collect(sels[i])::Vector{<:Action}
+                    sort!(acts; by = a -> (string(a.pkg), a.kind))
+                    push!(bad, "$tag: offers " *
+                        join_and(actions_phrase(action_phrase, acts, d.sources)) *
+                        " twice")
+                end
             elseif sels[i] ⊆ sels[j]
                 push!(bad, "$tag: one of the fixes offered is inside another")
             end
