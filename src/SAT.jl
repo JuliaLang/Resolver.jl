@@ -281,7 +281,7 @@ function SAT(
             n_p = nclasses(info_p)
             v_p = vars[p]
             l_p = get(lads, p, 0)
-            for (q, b) in info_p.interacts
+            for q in keys(info_p.interacts)
                 p < q || continue # conflicts are symmetrical
                 info_q = info[q]
                 n_q = nclasses(info_q)
