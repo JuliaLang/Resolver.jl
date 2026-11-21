@@ -46,7 +46,7 @@ struct DepsProvider{P, D<:PkgData}
 end
 
 function DepsProvider(
-    provider,
+    provider :: Any,
     packages :: SetOrVec{P},
 ) where {P}
     # check arguments
