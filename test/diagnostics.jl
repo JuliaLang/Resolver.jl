@@ -2342,3 +2342,15 @@ end
     @test occursin("drop dependency R\n", report)
     @test isempty(d.sources)
 end
+
+@testset "diagnosis: a side that leaves out the pivot narrows nothing" begin
+    # a side stated from a support the registry cannot satisfy has no literal
+    # on the pivot, so there is nothing for the other side to be narrowed to
+    L = Clauses.literal
+    on_a = Clauses.clause([:A => L(2, [1])])
+    off_a = Clauses.clause([:B => L(2, [1])])
+    meet = Diagnostics.Meet{Symbol}(:A, [(on_a, Symbol[]), (off_a, Symbol[])],
+                                    (false, 0, 0, 0, 0, 0, ""))
+    @test Diagnostics.side_narrowing(meet, 1) === nothing
+    @test Diagnostics.side_narrowing(meet, 2) == on_a[:A].bits
+end
