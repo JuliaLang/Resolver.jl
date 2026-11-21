@@ -794,6 +794,28 @@ end
     end
 end
 
+# (Theorem 29) a page that offers one fix twice is not an exact cover, and the
+# checker says which fix it repeated
+@testset "diagnosis: a fix offered twice is caught" begin
+    data = Dict(
+        :P => PkgData([:v3, :v2, :v1],
+                      Dict(:v3 => [:S], :v2 => [:Q], :v1 => [:Q, :R]), COMP_NONE),
+        :Q => PkgData([:w1], DEPS_NONE, COMP_NONE),
+        :R => PkgData([:w1], DEPS_NONE, COMP_NONE),
+        :S => PkgData([:w1], DEPS_NONE, COMP_NONE),
+    )
+    prob = Problem([:P]; compat = Dict(:P => [:v2, :v1], :Q => Symbol[]))
+    d = check_diagnosis(data, prob)
+    c = only(d.conflicts)
+    @test !isempty(c.fixes)
+    @test isempty(report_problems(d))
+    c′ = Conflict{Symbol,Symbol}(c.reqs, c.lines, c.versions, c.excluded,
+                                 [c.fixes; c.fixes[1]], c.blocks, c.upstream,
+                                 c.shadows)
+    probs = report_problems(Diagnosis(Conflict{Symbol,Symbol}[c′], d.others))
+    @test any(p -> occursin(r"^conflict 1: offers .* twice$", p), probs)
+end
+
 @testset "diagnosis: a package with a version left over" begin
     # :R@r1 needs :P and rules out :P@p1, and the bound takes :P@p2 away — so
     # :P is left with a version, just not one that works here
