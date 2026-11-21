@@ -1116,7 +1116,7 @@ end
 # whole, each side against the full pivot, so there is nothing to narrow to.
 function side_narrowing(meet, i::Int)
     length(meet.sides) == 2 || return nothing
-    m = first(meet.sides[3 - i])[meet.pivot]
+    m = get(first(meet.sides[3 - i]), meet.pivot, nothing)
     return m === nothing ? nothing : m.bits
 end
 
