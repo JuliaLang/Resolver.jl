@@ -384,7 +384,7 @@ end
 # prints shortest and says least, and choosing it throws away the very bound the
 # reader was about to hold against another. What is left is broken toward the
 # later package, so that the same clause always reads the same way.
-function default_subject(c::Clause{P}, vers) where {P}
+function default_subject(c::Clause{P}) where {P}
     best = nothing
     bestkey = (true, true)
     for (p, m) in c.lits
@@ -431,7 +431,7 @@ function clause_phrase(c::Clause{P}, vers, names = letters;
         end
     end
     s = subject === nothing || !haskey(c, subject) ?
-        default_subject(c, vers) : subject
+        default_subject(c) : subject
     ants = String[antecedent_phrase(q, c[q], vers, names) for q in ps if q != s]
     m = c[s]
     plural = length(ants) > 1
