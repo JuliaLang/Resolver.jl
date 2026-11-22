@@ -36,6 +36,20 @@ jobs:
       - name: Check the stdlib snapshot
         run: julia --project=bin bin/check_stdlibs.jl
 
+  # `jetls check` passes on the package, and this keeps it that way. It fails on
+  # warnings and errors only; info-level diagnostics such as an unused argument
+  # are shown but do not fail it. The action ref and the JETLS version are
+  # pinned to one release, so a new release cannot start failing an unrelated
+  # PR; bump both together.
+  jetls:
+    name: JETLS check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: aviatesk/JETLS.jl/.github/actions/check@2026-11-20
+        with:
+          version: '2026-11-20'
+
   test:
     name: Julia ${{ matrix.version }} - ${{ matrix.os }} - ${{ matrix.arch }} - ${{ github.event_name }}
     needs: stdlib-snapshot
