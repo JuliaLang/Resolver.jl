@@ -1,6 +1,6 @@
 # Resolver.jl
 
-A new, experimental package version resolver for Julia, built on a real SAT solver.
+A package version resolver for Julia, built on a real SAT solver.
 
 Resolver.jl was presented at JuliaCon 2025. For the full story, watch the talk or read the slides:
 
@@ -36,9 +36,6 @@ The core resolver in [`src/`](src/) is generic: it knows nothing about Julia ver
 
 ## Status
 
-Experimental and research-stage. Resolver.jl is a standalone package rather than a part of `Pkg`, but the core resolver is complete, and `bin/resolve.jl` resolves real projects against the General registry today — it already backs [`julia-downgrade-compat`](https://github.com/julia-actions/julia-downgrade-compat), which uses it to compute minimum-version manifests in CI.
+Resolver.jl is Pkg's default resolver from Julia 1.14 on: Pkg vendors a copy of `src/` rather than depending on the package. The same core backs `bin/resolve.jl`, which resolves real projects against the General registry, and [`julia-downgrade-compat`](https://github.com/julia-actions/julia-downgrade-compat), which uses it to compute minimum-version manifests in CI.
 
-A major in-progress goal is providing much better diagnostics when a manifest is **unresolvable** (unsatisfiable). The rich theory behind SAT problems helps here: rather than a bare failure, the resolver can compute
-
-- **MUSes (minimal unsatisfiable subsets)** — smallest sets of requirements that already conflict on their own, explaining *why* resolution failed; and
-- **MCSes (minimal correction sets)** — smallest sets of requirements whose removal would make the manifest resolvable, pointing at *what to change* to fix it.
+When a problem is **unresolvable** (unsatisfiable), the resolver explains why instead of just failing. Its diagnosis lists the requirements and constraints that conflict and the chain of registry facts that rules them out together. It also offers a menu of fixes, such as relaxing a compat bound or dropping a requirement, each verified to make the problem resolvable.
