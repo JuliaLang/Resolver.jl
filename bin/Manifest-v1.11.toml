@@ -2,7 +2,7 @@
 
 julia_version = "1.11.9"
 manifest_format = "2.0"
-project_hash = "d0273994dbd7c6962a4a015bbb47318ba699fafb"
+project_hash = "ad8bdd5ec7817f652f43dbb55fad76b1f4514091"
 
 [[deps.ArgTools]]
 uuid = "0dad84c5-d112-42e6-8d28-ef12dabb789f"
@@ -32,9 +32,9 @@ version = "1.11.0"
 
 [[deps.HistoricalStdlibVersions]]
 deps = ["Pkg", "PrecompileTools"]
-git-tree-sha1 = "1e8ebb20a91f3ac4f4d26beff76add2b81e5a791"
+git-tree-sha1 = "a9ee81389bf857e629a6b86bff1da9464b150ca5"
 uuid = "6df8b67a-e8a0-4029-b4b7-ac196fe72102"
-version = "2.0.13"
+version = "2.0.14"
 
 [[deps.JLLWrappers]]
 deps = ["Artifacts", "Preferences"]
