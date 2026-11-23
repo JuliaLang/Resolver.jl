@@ -9,7 +9,7 @@ Resolver.jl was presented at JuliaCon 2025. For the full story, watch the talk o
 
 ## Why a new resolver?
 
-Julia's current `Pkg` resolver, a belief-propagation solver by Carlo Baldassi, is a **heuristic**: it's fast and usually works well, but it isn't guaranteed to find a valid resolution even when one exists, and it makes no guarantees about *which* resolution it returns when several are possible. It also bakes in the assumption that **newer versions are always better** — an assumption that runs deep enough to make several things people increasingly want hard to support:
+Before Julia 1.14, Pkg's resolver was a belief-propagation solver by Carlo Baldassi. It is a **heuristic**: it's fast and usually works well, but it isn't guaranteed to find a valid resolution even when one exists, and it makes no guarantees about *which* resolution it returns when several are possible. It also bakes in the assumption that **newer versions are always better** — an assumption that runs deep enough to make several things people increasingly want hard to support:
 
 - **Pre-release and build versions**, which don't fit a simple "higher is better" ordering.
 - **Version fixing** — changing as little of an existing manifest as possible.
@@ -29,7 +29,7 @@ Resolver.jl separates *what* to optimize from *how* to solve, handing the solvin
     - a version's dependencies must be present, and
     - conflicting versions cannot both be chosen.
 - Before solving, the problem is shrunk by **reachability analysis** (keeping only versions that could appear in a solution) and **redundancy elimination** (dropping versions that are strictly dominated by others).
-- The solution is optimized **lexicographically, one package at a time**, against a caller-supplied priority order. If the problem is satisfiable, the resolver returns the unique Pareto-optimal resolution that version order and package priority determine. If it is unsatisfiable, it returns a **diagnosis**: which requirements and user constraints are in conflict, why, and a menu of verified fixes for each of them.
+- The solution is optimized **lexicographically, one package at a time**, against a caller-supplied priority order. If the problem is satisfiable, the resolver returns the unique Pareto-optimal resolution that version order and package priority determine. If it is unsatisfiable, it returns a **diagnosis**: which requirements and user constraints are in conflict, the chain of registry facts that rules them out together, and a menu of fixes for each conflict, such as relaxing a compat bound or dropping a requirement, each verified to make the problem resolvable.
 - Because the preference order is supplied per package, different strategies — newest, oldest/downgrade, prefer-installed, keep-current — can be mixed **within a single resolve**.
 
 The core resolver in [`src/`](src/) is generic: it knows nothing about Julia versions or registries. The [`bin/resolve.jl`](bin/resolve.jl) command-line tool adapts it to Julia's real registries and can emit a `Manifest.toml`.
