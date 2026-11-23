@@ -37,5 +37,3 @@ The core resolver in [`src/`](src/) is generic: it knows nothing about Julia ver
 ## Status
 
 Resolver.jl is Pkg's default resolver from Julia 1.14 on: Pkg vendors a copy of `src/` rather than depending on the package. The same core backs `bin/resolve.jl`, which resolves real projects against the General registry, and [`julia-downgrade-compat`](https://github.com/julia-actions/julia-downgrade-compat), which uses it to compute minimum-version manifests in CI.
-
-When a problem is **unresolvable** (unsatisfiable), the resolver explains why instead of just failing. Its diagnosis lists the requirements and constraints that conflict and the chain of registry facts that rules them out together. It also offers a menu of fixes, such as relaxing a compat bound or dropping a requirement, each verified to make the problem resolvable.
